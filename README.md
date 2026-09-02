@@ -6,29 +6,22 @@ The current implementation can inspect MPC/MPCX files, communicate with SiTCP ov
 
 ## How to use
 
-Clone the repository and install it into a Python virtual environment:
+No `pip install` is required for normal use. Clone the repository and run the executable wrapper directly:
 
 ```bash
 git clone https://github.com/nobukoba/sitcp-mpcx-mpc-writer-python-first-trial.git
 cd sitcp-mpcx-mpc-writer-python-first-trial
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+./sitcp-mpc-writer --help
 ```
 
-Check that the command is available:
-
-```bash
-sitcp-mpc-writer --help
-```
+The wrapper runs the package from `src/` with `python3`, so it also avoids the `externally-managed-environment` error produced by Homebrew/Debian-style system Python environments.
 
 ### Inspect an MPC/MPCX file
 
 This does not access the FPGA or EEPROM.
 
 ```bash
-sitcp-mpc-writer inspect ./device.mpcx
+./sitcp-mpc-writer inspect ./device.mpcx
 ```
 
 The official SiTCP MPC Writer XG 0.4.1-2 loader has been reconstructed far enough to verify that MPC/MPCX files handled by that path are 22 bytes and to reproduce its 7-byte tag decoding/type detection.
@@ -42,7 +35,7 @@ For a device in ForceDefault mode, the default IP address is typically `192.168.
 Use a register address that is known to be safe to read in the FPGA design:
 
 ```bash
-sitcp-mpc-writer probe \
+./sitcp-mpc-writer probe \
   --ip 192.168.10.10 \
   --port 4660 \
   --address 0x00000000 \
@@ -52,7 +45,7 @@ sitcp-mpc-writer probe \
 ### Read raw RBCP data
 
 ```bash
-sitcp-mpc-writer rbcp-read \
+./sitcp-mpc-writer rbcp-read \
   --ip 192.168.10.10 \
   --port 4660 \
   --address 0x00000000 \
@@ -64,7 +57,7 @@ sitcp-mpc-writer rbcp-read \
 Static analysis of the official SiTCP MPC Writer XG 0.4.1-2 shows a 64-byte read beginning at RBCP address `0xFFFFFC10`.
 
 ```bash
-sitcp-mpc-writer eeprom-read \
+./sitcp-mpc-writer eeprom-read \
   --ip 192.168.10.10 \
   --port 4660
 ```
@@ -82,7 +75,7 @@ The reconstructed official sequence is:
 The Python CLI requires an explicit confirmation option:
 
 ```bash
-sitcp-mpc-writer clear \
+./sitcp-mpc-writer clear \
   --ip 192.168.10.10 \
   --port 4660 \
   --yes-really-clear
@@ -95,7 +88,7 @@ Do not run this on a device whose MPC/EEPROM contents must be preserved.
 A raw write command is provided for expert testing:
 
 ```bash
-sitcp-mpc-writer rbcp-write \
+./sitcp-mpc-writer rbcp-write \
   --ip 192.168.10.10 \
   --port 4660 \
   --address 0x12345678 \
@@ -109,7 +102,7 @@ This is not the MPC/MPCX programming command. The user is responsible for choosi
 The intended final command is:
 
 ```bash
-sitcp-mpc-writer write ./device.mpcx \
+./sitcp-mpc-writer write ./device.mpcx \
   --ip 192.168.10.10 \
   --port 4660
 ```
@@ -137,6 +130,19 @@ Still under investigation:
 - complete `Write MPC(X)` sequence.
 
 These parts are not guessed because an incorrect implementation can overwrite EEPROM configuration or license information.
+
+## Optional installation into a virtual environment
+
+If you want `sitcp-mpc-writer` available inside a Python environment without the leading `./`, use a virtual environment rather than installing into the system Python:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e .
+sitcp-mpc-writer --help
+```
+
+Do not use `sudo pip install` or `--break-system-packages` for this repository.
 
 ## Docker
 
@@ -174,6 +180,7 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
 
 ```text
 .
+├── sitcp-mpc-writer
 ├── Dockerfile
 ├── README.md
 ├── REVERSE_ENGINEERING.md
@@ -193,10 +200,10 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
 
 ## For Developers
 
-Run the current tests with:
+Run the current tests without installing the package:
 
 ```bash
-python -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 The project intentionally has no third-party runtime Python dependencies. RBCP communication uses the Python standard library.
