@@ -5,12 +5,44 @@ from pathlib import Path
 import sys
 
 from .mpc import inspect_file, build_mpcx_eeprom_record
-from .rbcp import RbcpClient, RbcpError
+from .rbcp import RbcpClient, RbcpError, RbcpTimeout
 from .eeprom import read_extension, clear_mpc_area
 
 
 def _int_auto(value: str) -> int:
     return int(value, 0)
+
+
+def _read_with_retry(c: RbcpClient, address: int, length: int, attempts: int = 3) -> bytes:
+    """Retry a read-only RBCP transaction after transient UDP timeouts.
+
+    Reads are safe to repeat.  Writes are intentionally not retried here because
+    a lost ACK does not prove that the target failed to perform the write.
+    """
+    last_error: RbcpTimeout | None = None
+    for _ in range(attempts):
+        try:
+            return c.read(address, length)
+        except RbcpTimeout as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+def _read_preserved_mpcx_bytes(c: RbcpClient) -> bytes:
+    """Read FC10-11 robustly for the reconstructed XG 24-byte record.
+
+    Prefer one 2-byte request.  If that repeatedly times out, fall back to two
+    independent one-byte reads; real XG hardware has shown occasional timeout
+    sensitivity depending on EEPROM read length/transaction timing.
+    """
+    try:
+        return _read_with_retry(c, 0xFFFFFC10, 2)
+    except RbcpTimeout:
+        return (
+            _read_with_retry(c, 0xFFFFFC10, 1)
+            + _read_with_retry(c, 0xFFFFFC11, 1)
+        )
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
@@ -62,7 +94,7 @@ def cmd_mpcx_plan(args: argparse.Namespace) -> int:
         return 2
 
     c = RbcpClient(args.ip, args.port, args.timeout)
-    preserved = c.read(0xFFFFFC10, 2)
+    preserved = _read_preserved_mpcx_bytes(c)
     record = build_mpcx_eeprom_record(data, preserved)
 
     target_mac = record[18:24]
