@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -c 'from sitcp_mpc_writer.cli import main_reader; raise SystemExit(main_reader())' "$@"
