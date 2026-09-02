@@ -38,6 +38,8 @@ chmod +x mpcx-mpc-writer
 ./mpcx-mpc-writer --help
 ```
 
+For commands that access hardware, the target IP address is a positional argument. The RBCP UDP port defaults to `4660`, so `--port` normally does not need to be specified.
+
 ### Inspect a file
 
 ```bash
@@ -58,19 +60,13 @@ The filename extension is ignored for this classification.
 Use the same command for both generations:
 
 ```bash
-./mpcx-mpc-writer verify ./device.mpc \
-  --ip 192.168.2.161 \
-  --port 4660 \
-  --timeout 3
+./mpcx-mpc-writer verify ./device.mpc 192.168.2.161
 ```
 
 or:
 
 ```bash
-./mpcx-mpc-writer verify ./device.mpcx \
-  --ip 192.168.2.169 \
-  --port 4660 \
-  --timeout 3
+./mpcx-mpc-writer verify ./device.mpcx 192.168.2.169
 ```
 
 The command classifies the 22-byte payload and selects the corresponding verified EEPROM mapping. No write is performed.
@@ -99,22 +95,15 @@ NO WRITE PERFORMED
 
 ### Check RBCP connectivity
 
-The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the default IP is typically `192.168.10.10`.
-
 ```bash
-./mpcx-mpc-writer probe \
-  --ip 192.168.10.10 \
-  --port 4660 \
-  --address 0x00000000 \
-  --length 1
+./mpcx-mpc-writer probe 192.168.10.10 \
+  --address 0x00000000
 ```
 
 ### Read raw RBCP data
 
 ```bash
-./mpcx-mpc-writer rbcp-read \
-  --ip 192.168.10.10 \
-  --port 4660 \
+./mpcx-mpc-writer rbcp-read 192.168.10.10 \
   --address 0x00000000 \
   --length 16
 ```
@@ -122,9 +111,7 @@ The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the defa
 ### Read EEPROM area
 
 ```bash
-./mpcx-mpc-writer eeprom-read \
-  --ip 192.168.10.10 \
-  --port 4660
+./mpcx-mpc-writer eeprom-read 192.168.10.10
 ```
 
 ### Clear the MPC EEPROM area
@@ -134,10 +121,7 @@ The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the defa
 The reconstructed official sequence enables EEPROM writing with `0xFFFFFCFF <- 0x00`, writes `0xFF` over `0xFFFFFC00..0xFFFFFC7F` in 16-byte blocks, and disables writing with `0xFFFFFCFF <- 0xFF`.
 
 ```bash
-./mpcx-mpc-writer clear \
-  --ip 192.168.10.10 \
-  --port 4660 \
-  --yes-really-clear
+./mpcx-mpc-writer clear 192.168.10.10 --yes-really-clear
 ```
 
 Do not run this on a device whose MPC/EEPROM contents must be preserved.
@@ -145,14 +129,20 @@ Do not run this on a device whose MPC/EEPROM contents must be preserved.
 ### Raw RBCP write
 
 ```bash
-./mpcx-mpc-writer rbcp-write \
-  --ip 192.168.10.10 \
-  --port 4660 \
+./mpcx-mpc-writer rbcp-write 192.168.10.10 \
   --address 0x12345678 \
   --hex-data "01 02 03 04"
 ```
 
 This is an expert raw-access command, not the high-level MPC programming command.
+
+### Non-default RBCP port
+
+Port `4660` is used automatically. Specify `--port` only when the target uses another RBCP port:
+
+```bash
+./mpcx-mpc-writer probe 192.168.10.10 --port 5000 --address 0x00000000
+```
 
 ## MPC writing status
 
@@ -160,8 +150,8 @@ The intended final interface is extension-independent:
 
 ```bash
 ./mpcx-mpc-writer inspect FILE
-./mpcx-mpc-writer verify FILE --ip DEVICE_IP
-./mpcx-mpc-writer write FILE --ip DEVICE_IP
+./mpcx-mpc-writer verify FILE DEVICE_IP
+./mpcx-mpc-writer write FILE DEVICE_IP
 ```
 
 `write` is currently disabled.
