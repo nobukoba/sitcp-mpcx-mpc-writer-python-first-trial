@@ -2,6 +2,8 @@
 
 Experimental cross-platform Python CLI for inspecting and eventually writing SiTCP / SiTCP-XG MPC data from macOS, Linux, WSL, and Docker without using the official Windows GUI.
 
+The command name is **`mpcx-mpc-writer`**.
+
 The important design rule is that **SiTCP versus SiTCP-XG is determined from the 22-byte file payload, not from the filename extension**. An SiTCP-XG file may therefore be named `.mpc`; `.mpcx` is not required for detection.
 
 The current implementation can inspect MPC files, classify the payload using the same two decode paths reconstructed from the official Writer, communicate with SiTCP over RBCP, and verify the known EEPROM mappings on normal SiTCP and SiTCP-XG. High-level MPC programming is still intentionally disabled.
@@ -19,6 +21,7 @@ Public references include:
 - SiTCP / SiTCP-XG downloads and manuals: https://www.bbtech.co.jp/download-files/sitcp/index_en.html
 - SiTCP MPC Writer XG guide: https://www.bbtech.co.jp/download-files/sitcp/SiTCP-MPC-Writer-XG-en.0.1.1.pdf
 - Bee Beans Technologies `sitcpy`: https://github.com/BeeBeansTechnologies/sitcpy
+- SiTCP Forum: https://sitcp.bbtech.co.jp/
 
 The public MPC Writer guide states that an MPCX file contains the SiTCP-XG global MAC address and license information and is written to EEPROM. However, the reviewed public documentation does **not** describe the complete byte-level 22-byte MPC payload format or the Writer's two-path content classifier. Those details were reconstructed from the Writer and checked against real hardware.
 
@@ -31,13 +34,14 @@ No `pip install` is required for normal use:
 ```bash
 git clone https://github.com/nobukoba/sitcp-mpcx-mpc-writer-python-first-trial.git
 cd sitcp-mpcx-mpc-writer-python-first-trial
-./sitcp-mpc-writer --help
+chmod +x mpcx-mpc-writer
+./mpcx-mpc-writer --help
 ```
 
 ### Inspect a file
 
 ```bash
-./sitcp-mpc-writer inspect ./device.mpc
+./mpcx-mpc-writer inspect ./device.mpc
 ```
 
 The current classifier reproduces the official Writer's two decode paths:
@@ -54,7 +58,7 @@ The filename extension is ignored for this classification.
 Use the same command for both generations:
 
 ```bash
-./sitcp-mpc-writer verify ./device.mpc \
+./mpcx-mpc-writer verify ./device.mpc \
   --ip 192.168.2.161 \
   --port 4660 \
   --timeout 3
@@ -63,7 +67,7 @@ Use the same command for both generations:
 or:
 
 ```bash
-./sitcp-mpc-writer verify ./device.mpcx \
+./mpcx-mpc-writer verify ./device.mpcx \
   --ip 192.168.2.169 \
   --port 4660 \
   --timeout 3
@@ -98,7 +102,7 @@ NO WRITE PERFORMED
 The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the default IP is typically `192.168.10.10`.
 
 ```bash
-./sitcp-mpc-writer probe \
+./mpcx-mpc-writer probe \
   --ip 192.168.10.10 \
   --port 4660 \
   --address 0x00000000 \
@@ -108,7 +112,7 @@ The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the defa
 ### Read raw RBCP data
 
 ```bash
-./sitcp-mpc-writer rbcp-read \
+./mpcx-mpc-writer rbcp-read \
   --ip 192.168.10.10 \
   --port 4660 \
   --address 0x00000000 \
@@ -118,7 +122,7 @@ The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the defa
 ### Read EEPROM area
 
 ```bash
-./sitcp-mpc-writer eeprom-read \
+./mpcx-mpc-writer eeprom-read \
   --ip 192.168.10.10 \
   --port 4660
 ```
@@ -130,7 +134,7 @@ The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the defa
 The reconstructed official sequence enables EEPROM writing with `0xFFFFFCFF <- 0x00`, writes `0xFF` over `0xFFFFFC00..0xFFFFFC7F` in 16-byte blocks, and disables writing with `0xFFFFFCFF <- 0xFF`.
 
 ```bash
-./sitcp-mpc-writer clear \
+./mpcx-mpc-writer clear \
   --ip 192.168.10.10 \
   --port 4660 \
   --yes-really-clear
@@ -141,7 +145,7 @@ Do not run this on a device whose MPC/EEPROM contents must be preserved.
 ### Raw RBCP write
 
 ```bash
-./sitcp-mpc-writer rbcp-write \
+./mpcx-mpc-writer rbcp-write \
   --ip 192.168.10.10 \
   --port 4660 \
   --address 0x12345678 \
@@ -155,9 +159,9 @@ This is an expert raw-access command, not the high-level MPC programming command
 The intended final interface is extension-independent:
 
 ```bash
-./sitcp-mpc-writer inspect FILE
-./sitcp-mpc-writer verify FILE --ip DEVICE_IP
-./sitcp-mpc-writer write FILE --ip DEVICE_IP
+./mpcx-mpc-writer inspect FILE
+./mpcx-mpc-writer verify FILE --ip DEVICE_IP
+./mpcx-mpc-writer write FILE --ip DEVICE_IP
 ```
 
 `write` is currently disabled.
@@ -172,7 +176,7 @@ Read transactions may be retried after UDP timeouts. Writes are intentionally no
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -e .
-sitcp-mpc-writer --help
+mpcx-mpc-writer --help
 ```
 
 Do not use `sudo pip install` or `--break-system-packages` for this repository.
@@ -198,7 +202,7 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
 
 ```text
 .
-├── sitcp-mpc-writer
+├── mpcx-mpc-writer
 ├── Dockerfile
 ├── README.md
 ├── REVERSE_ENGINEERING.md
