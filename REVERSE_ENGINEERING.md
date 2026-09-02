@@ -19,6 +19,8 @@ Useful public sources include:
   https://www.bbtech.co.jp/download-files/sitcp/SiTCP-MPC-Writer-XG-en.0.1.1.pdf
 - Official `sitcpy` Python repository:
   https://github.com/BeeBeansTechnologies/sitcpy
+- SiTCP Forum:
+  https://sitcp.bbtech.co.jp/
 
 The public SiTCP-XG documentation establishes, among other things:
 
@@ -29,6 +31,33 @@ The public SiTCP-XG documentation establishes, among other things:
 - EEPROM can be read without releasing write protection.
 
 The public MPC Writer XG guide states that the MPCX file contains the SiTCP-XG global MAC address and license information and that the Writer programs this information into EEPROM. It documents the GUI workflow, but not the byte-level 22-byte file format used by the implementation.
+
+### Search for a public MPC/MPCX byte-level specification
+
+As of 2026-09-03, the public Bee Beans download material and publicly searchable SiTCP Forum material were reviewed specifically for a description of the MPC/MPCX payload format. The reviewed public material contains useful information about EEPROM access, MAC/license programming, SiTCP/SiTCP-XG configuration, and the MPC Writer workflow, but **no public byte-level specification was found for the 22-byte MPC/MPCX payload or for the Writer's Type-1/Type-2 classifier**.
+
+In particular, no reviewed public source was found that documents all of the following implementation details:
+
+```text
+payload length = 22 bytes
+
+Type 1 classifier:
+  decode payload[0:7] with the Writer's 0x2c transformation
+
+Type 2 classifier:
+  decode payload[6:13] with the Writer's 0x34 transformation
+
+SiTCP-XG mapping:
+  payload[0:16]  -> FC00..FC0F
+  preserve       -> FC10..FC11
+  payload[16:22] -> FC12..FC17
+
+normal SiTCP mapping:
+  payload[0:6]   -> FC12..FC17
+  payload[6:22]  -> FC40..FC4F
+```
+
+This is a statement about the public material reviewed, not a claim that no such document can exist anywhere. The byte-level information used by this project should therefore be attributed to Writer analysis and hardware/file verification unless a public specification is subsequently identified.
 
 ## Confirmed RBCP functions from Writer static analysis
 
@@ -127,7 +156,7 @@ This layout is different from the XG/type-1 24-byte record and must remain a sep
 
 ## Evidence status summary
 
-| Item | Public docs | Writer analysis | Real hardware/file verification |
+| Item | Public docs/forum reviewed | Writer analysis | Real hardware/file verification |
 | --- | --- | --- | --- |
 | RBCP access exists | yes | yes | yes |
 | EEPROM `0xFFFFFC00..FF` | yes | yes | yes |
@@ -135,7 +164,7 @@ This layout is different from the XG/type-1 24-byte record and must remain a sep
 | MPC payload is exactly 22 bytes | not found | yes | yes, tested files |
 | content-based type classifier | not found | yes | yes, matches known SiTCP/XG files |
 | XG 16 + preserved 2 + 6 mapping | not found | yes | yes |
-| normal SiTCP 6 + 16 mapping | not found in reviewed docs | implementation path investigated | yes |
+| normal SiTCP 6 + 16 mapping | not found in reviewed material | implementation path investigated | yes |
 | filename extension determines generation | no | no | no; do not use it |
 
 ## Still under reconstruction
