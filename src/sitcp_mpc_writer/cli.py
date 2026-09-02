@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import argparse
+import sys
+
+from .mpc import inspect_file
+from .rbcp import RbcpClient, RbcpError
+from .eeprom import read_extension, clear_mpc_area
+
+
+def _int_auto(value: str) -> int:
+    return int(value, 0)
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    info = inspect_file(args.file, args.preview)
+    print(f"file    : {info.path}")
+    print(f"kind    : {info.kind}")
+    print(f"size    : {info.size} bytes")
+    print(f"sha256  : {info.sha256}")
+    print(f"preview : {info.preview_hex}")
+    print(f"writer-size-valid : {info.writer_size_valid}")
+    print(f"writer-type       : {info.writer_type}")
+    print(f"decoded-tag       : {info.decoded_tag}")
+    print(f"decoded-tag-hex   : {info.decoded_tag_hex}")
+    print(f"alternate-decoded: {info.alternate_decoded_hex}")
+    return 0
+
+
+def cmd_rbcp_read(args: argparse.Namespace) -> int:
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    data = c.read(args.address, args.length)
+    print(data.hex(" "))
+    return 0
+
+
+def cmd_rbcp_write(args: argparse.Namespace) -> int:
+    data = bytes.fromhex(args.hex_data.replace("0x", "").replace(",", " "))
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    c.write(args.address, data)
+    print(f"wrote {len(data)} byte(s) to 0x{args.address:08x}")
+    return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    try:
+        data = c.read(args.address, args.length)
+    except RbcpError as exc:
+        print(f"probe failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"RBCP reachable: {args.ip}:{args.port}")
+    print(f"read 0x{args.address:08x}+{args.length}: {data.hex(' ')}")
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    info = inspect_file(args.file)
+    print(f"file OK : {info.path} ({info.kind}, {info.size} bytes)")
+    print(f"sha256  : {info.sha256}")
+    print("device compatibility check: NOT IMPLEMENTED")
+    print(
+        "Reason: the public documentation does not specify the MPC/MPCX "
+        "compatibility algorithm or EEPROM programming register map."
+    )
+    return 3
+
+
+def cmd_write_mpc(args: argparse.Namespace) -> int:
+    print("REFUSED: MPC/MPCX EEPROM programming is not enabled in this build.", file=sys.stderr)
+    print(
+        "The write sequence and file format must be verified from an official "
+        "specification or a captured transaction before enabling this command.",
+        file=sys.stderr,
+    )
+    return 4
+
+
+def cmd_eeprom_read(args: argparse.Namespace) -> int:
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    data = read_extension(c)
+    print(data.hex(" "))
+    return 0
+
+
+def cmd_clear(args: argparse.Namespace) -> int:
+    if not args.yes_really_clear:
+        print("REFUSED: clear is destructive; add --yes-really-clear", file=sys.stderr)
+        return 5
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    clear_mpc_area(c)
+    print("cleared MPC EEPROM area 0xfffffc00..0xfffffc7f")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="sitcp-mpc-writer")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    q = sub.add_parser("inspect", help="inspect an MPC/MPCX file without writing")
+    q.add_argument("file")
+    q.add_argument("--preview", type=int, default=32)
+    q.set_defaults(func=cmd_inspect)
+
+    q = sub.add_parser("probe", help="verify RBCP connectivity with a harmless read")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--address", type=_int_auto, required=True,
+                   help="known safe readable register address, e.g. 0x00000000")
+    q.add_argument("--length", type=int, default=1)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.set_defaults(func=cmd_probe)
+
+    q = sub.add_parser("rbcp-read", help="raw RBCP read")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--address", type=_int_auto, required=True)
+    q.add_argument("--length", type=int, required=True)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.set_defaults(func=cmd_rbcp_read)
+
+    q = sub.add_parser("rbcp-write", help="raw RBCP write (expert use)")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--address", type=_int_auto, required=True)
+    q.add_argument("--hex-data", required=True)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.set_defaults(func=cmd_rbcp_write)
+
+    q = sub.add_parser("eeprom-read", help="read the 64-byte EEPROM extension area reconstructed from official Writer XG")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.set_defaults(func=cmd_eeprom_read)
+
+    q = sub.add_parser("clear", help="DESTRUCTIVE: reproduce official Clear MPC(X) EEPROM erase sequence")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.add_argument("--yes-really-clear", action="store_true")
+    q.set_defaults(func=cmd_clear)
+
+    q = sub.add_parser("check", help="file check; device compatibility pending")
+    q.add_argument("file")
+    q.add_argument("--ip")
+    q.add_argument("--port", type=int, default=4660)
+    q.set_defaults(func=cmd_check)
+
+    q = sub.add_parser("write", help="MPC/MPCX write (currently safety-disabled)")
+    q.add_argument("file")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.set_defaults(func=cmd_write_mpc)
+    return p
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
