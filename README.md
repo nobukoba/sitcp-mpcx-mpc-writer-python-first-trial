@@ -5,9 +5,9 @@ Experimental cross-platform Python CLI for inspecting and eventually writing SiT
 The user-facing commands are split by purpose:
 
 ```text
-mpcmpcx-writer  IP FILE
-mpcmpcx-reader  IP
-mpcmpcx-command COMMAND ...
+mpc-mpcx-writer  IP FILE
+mpc-mpcx-reader  IP
+mpc-mpcx-command COMMAND ...
 ```
 
 RBCP UDP port `4660` is used by default, so it normally does not need to be written on the command line.
@@ -42,19 +42,19 @@ No `pip install` is required for normal use:
 ```bash
 git clone https://github.com/nobukoba/sitcp-mpcx-mpc-writer-python-first-trial.git
 cd sitcp-mpcx-mpc-writer-python-first-trial
-chmod +x mpcmpcx-writer mpcmpcx-reader mpcmpcx-command
+chmod +x mpc-mpcx-writer mpc-mpcx-reader mpc-mpcx-command
 ```
 
 ### Write an MPC/MPCX file
 
 ```bash
-./mpcmpcx-writer 192.168.2.169 2F20880E82.mpcx
+./mpc-mpcx-writer 192.168.2.169 2F20880E82.mpcx
 ```
 
 or, for a normal SiTCP device:
 
 ```bash
-./mpcmpcx-writer 192.168.2.161 2F20880E6E.mpc
+./mpc-mpcx-writer 192.168.2.161 2F20880E6E.mpc
 ```
 
 The first argument is the target IP address and the second is the MPC/MPCX file. The file extension is not used to decide whether the payload is SiTCP or SiTCP-XG.
@@ -64,38 +64,38 @@ The first argument is the target IP address and the second is the MPC/MPCX file.
 ### Read MPC-related EEPROM data
 
 ```bash
-./mpcmpcx-reader 192.168.2.169
+./mpc-mpcx-reader 192.168.2.169
 ```
 
 This is the normal read-only command. No MPC/MPCX file is required.
 
 ### Advanced commands
 
-Detailed inspection, verification, and RBCP operations are collected under `mpcmpcx-command`.
+Detailed inspection, verification, and RBCP operations are collected under `mpc-mpcx-command`.
 
 Verify a file against a device:
 
 ```bash
-./mpcmpcx-command verify 192.168.2.169 2F20880E82.mpcx
+./mpc-mpcx-command verify 192.168.2.169 2F20880E82.mpcx
 ```
 
 Inspect a file without hardware:
 
 ```bash
-./mpcmpcx-command inspect 2F20880E82.mpcx
+./mpc-mpcx-command inspect 2F20880E82.mpcx
 ```
 
 Check RBCP connectivity:
 
 ```bash
-./mpcmpcx-command probe 192.168.10.10 \
+./mpc-mpcx-command probe 192.168.10.10 \
   --address 0x00000000
 ```
 
 Expert raw RBCP read:
 
 ```bash
-./mpcmpcx-command rbcp-read 192.168.10.10 \
+./mpc-mpcx-command rbcp-read 192.168.10.10 \
   --address 0x00000000 \
   --length 16
 ```
@@ -103,7 +103,7 @@ Expert raw RBCP read:
 Expert raw RBCP write:
 
 ```bash
-./mpcmpcx-command rbcp-write 192.168.10.10 \
+./mpc-mpcx-command rbcp-write 192.168.10.10 \
   --address 0x12345678 \
   --hex-data "01 02 03 04"
 ```
@@ -111,7 +111,7 @@ Expert raw RBCP write:
 Clear the MPC EEPROM area:
 
 ```bash
-./mpcmpcx-command clear 192.168.10.10 --yes-really-clear
+./mpc-mpcx-command clear 192.168.10.10 --yes-really-clear
 ```
 
 **`clear` is destructive.** Do not run it on a device whose MPC/EEPROM contents must be preserved.
@@ -145,25 +145,25 @@ NO WRITE PERFORMED
 Port `4660` is used automatically. Specify `--port` only when the target uses another RBCP port:
 
 ```bash
-./mpcmpcx-reader 192.168.2.169 --port 5000
+./mpc-mpcx-reader 192.168.2.169 --port 5000
 ```
 
 or:
 
 ```bash
-./mpcmpcx-command verify 192.168.2.169 2F20880E82.mpcx --port 5000
+./mpc-mpcx-command verify 192.168.2.169 2F20880E82.mpcx --port 5000
 ```
 
 ## Command summary
 
 ```text
-mpcmpcx-writer IP FILE                 write MPC/MPCX (currently safety-disabled)
-mpcmpcx-reader IP                      read MPC-related EEPROM area
-mpcmpcx-command verify IP FILE         compare file with target EEPROM
-mpcmpcx-command inspect FILE           inspect/classify a file
-mpcmpcx-command probe IP ...           test RBCP connectivity
-mpcmpcx-command rbcp-read IP ...       expert raw RBCP read
-mpcmpcx-command rbcp-write IP ...      expert raw RBCP write
+mpc-mpcx-writer IP FILE                 write MPC/MPCX (currently safety-disabled)
+mpc-mpcx-reader IP                      read MPC-related EEPROM area
+mpc-mpcx-command verify IP FILE         compare file with target EEPROM
+mpc-mpcx-command inspect FILE           inspect/classify a file
+mpc-mpcx-command probe IP ...           test RBCP connectivity
+mpc-mpcx-command rbcp-read IP ...       expert raw RBCP read
+mpc-mpcx-command rbcp-write IP ...      expert raw RBCP write
 ```
 
 ## Optional virtual-environment installation
@@ -172,9 +172,9 @@ mpcmpcx-command rbcp-write IP ...      expert raw RBCP write
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -e .
-mpcmpcx-writer --help
-mpcmpcx-reader --help
-mpcmpcx-command --help
+mpc-mpcx-writer --help
+mpc-mpcx-reader --help
+mpc-mpcx-command --help
 ```
 
 Do not use `sudo pip install` or `--break-system-packages` for this repository.
@@ -191,9 +191,9 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
 
 ```text
 .
-├── mpcmpcx-writer
-├── mpcmpcx-reader
-├── mpcmpcx-command
+├── mpc-mpcx-writer
+├── mpc-mpcx-reader
+├── mpc-mpcx-command
 ├── Dockerfile
 ├── README.md
 ├── REVERSE_ENGINEERING.md
