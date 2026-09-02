@@ -4,11 +4,29 @@ Experimental cross-platform Python CLI for inspecting and eventually writing SiT
 
 The important design rule is that **SiTCP versus SiTCP-XG is determined from the 22-byte file payload, not from the filename extension**. An SiTCP-XG file may therefore be named `.mpc`; `.mpcx` is not required for detection.
 
-The current implementation can inspect MPC files, classify the payload using the same two decode paths reconstructed from the official Writer, communicate with SiTCP over RBCP, verify known EEPROM mappings on normal SiTCP and SiTCP-XG, read the reconstructed EEPROM extension area, and reproduce the official `Clear MPC(X)` sequence. High-level MPC programming is still intentionally disabled.
+The current implementation can inspect MPC files, classify the payload using the same two decode paths reconstructed from the official Writer, communicate with SiTCP over RBCP, and verify the known EEPROM mappings on normal SiTCP and SiTCP-XG. High-level MPC programming is still intentionally disabled.
+
+## Where the format information comes from
+
+This project uses three evidence sources and keeps them separate:
+
+1. **Public Bee Beans Technologies documentation** — documents SiTCP/SiTCP-XG, RBCP-accessible internal/EEPROM areas, EEPROM write protection, and operation of the official MPC Writer.
+2. **Static analysis of the official `SiTcpMpcWriteXG.exe`** — recovered details not found in the reviewed public manuals, including the exact 22-byte length check, content classifier, RBCP packet handling, and XG record construction.
+3. **Read-only tests with matching real MPC files and hardware** — confirmed the normal-SiTCP and SiTCP-XG file-to-EEPROM mappings.
+
+Public references include:
+
+- SiTCP / SiTCP-XG downloads and manuals: https://www.bbtech.co.jp/download-files/sitcp/index_en.html
+- SiTCP MPC Writer XG guide: https://www.bbtech.co.jp/download-files/sitcp/SiTCP-MPC-Writer-XG-en.0.1.1.pdf
+- Bee Beans Technologies `sitcpy`: https://github.com/BeeBeansTechnologies/sitcpy
+
+The public MPC Writer guide states that an MPCX file contains the SiTCP-XG global MAC address and license information and is written to EEPROM. However, the reviewed public documentation does **not** describe the complete byte-level 22-byte MPC payload format or the Writer's two-path content classifier. Those details were reconstructed from the Writer and checked against real hardware.
+
+See `REVERSE_ENGINEERING.md` for an evidence-by-evidence table.
 
 ## How to use
 
-No `pip install` is required for normal use. Clone the repository and run the executable wrapper directly:
+No `pip install` is required for normal use:
 
 ```bash
 git clone https://github.com/nobukoba/sitcp-mpcx-mpc-writer-python-first-trial.git
@@ -16,32 +34,24 @@ cd sitcp-mpcx-mpc-writer-python-first-trial
 ./sitcp-mpc-writer --help
 ```
 
-The wrapper runs the package from `src/` with `python3`, so it also avoids the `externally-managed-environment` error produced by Homebrew/Debian-style system Python environments.
-
-## Basic commands
-
 ### Inspect a file
-
-This only reads the file and does not access the FPGA or EEPROM.
 
 ```bash
 ./sitcp-mpc-writer inspect ./device.mpc
 ```
 
-The official SiTCP MPC Writer XG 0.4.1-2 loader has been reconstructed far enough to confirm a 22-byte payload and two 7-byte decode paths used to classify the data.
-
-Current classifier result:
+The current classifier reproduces the official Writer's two decode paths:
 
 ```text
 writer type 1 -> SiTCP-XG payload
 writer type 2 -> normal SiTCP payload
 ```
 
-The extension is ignored for this classification. For example, an XG payload named `device.mpc` is still detected as SiTCP-XG.
+The filename extension is ignored for this classification.
 
 ### Verify a file against a device
 
-Use the same `verify` command for both normal SiTCP and SiTCP-XG:
+Use the same command for both generations:
 
 ```bash
 ./sitcp-mpc-writer verify ./device.mpc \
@@ -50,7 +60,7 @@ Use the same `verify` command for both normal SiTCP and SiTCP-XG:
   --timeout 3
 ```
 
-or, for an XG device:
+or:
 
 ```bash
 ./sitcp-mpc-writer verify ./device.mpcx \
@@ -59,16 +69,16 @@ or, for an XG device:
   --timeout 3
 ```
 
-The command first classifies the 22-byte payload, then selects the verified EEPROM mapping automatically. No write is performed.
+The command classifies the 22-byte payload and selects the corresponding verified EEPROM mapping. No write is performed.
 
-For normal SiTCP, the mapping confirmed against a matching real device/file pair is:
+Normal SiTCP mapping confirmed with a matching real device/file pair:
 
 ```text
 file[0:6]   -> EEPROM 0xFFFFFC12..0xFFFFFC17
 file[6:22]  -> EEPROM 0xFFFFFC40..0xFFFFFC4F
 ```
 
-For SiTCP-XG, the mapping confirmed against a matching real device/file pair and static analysis of the official Writer is:
+SiTCP-XG mapping confirmed with a matching real device/file pair and static analysis of the official Writer:
 
 ```text
 file[0:16]  -> EEPROM 0xFFFFFC00..0xFFFFFC0F
@@ -85,11 +95,7 @@ NO WRITE PERFORMED
 
 ### Check RBCP connectivity
 
-The default RBCP UDP port used by SiTCP is `4660`.
-
-For a device in ForceDefault mode, the default IP address is typically `192.168.10.10`.
-
-Use a register address that is known to be safe to read in the FPGA design:
+The default RBCP UDP port is `4660`. For a device in ForceDefault mode, the default IP is typically `192.168.10.10`.
 
 ```bash
 ./sitcp-mpc-writer probe \
@@ -109,7 +115,7 @@ Use a register address that is known to be safe to read in the FPGA design:
   --length 16
 ```
 
-### Read the reconstructed EEPROM extension area
+### Read EEPROM area
 
 ```bash
 ./sitcp-mpc-writer eeprom-read \
@@ -121,13 +127,7 @@ Use a register address that is known to be safe to read in the FPGA design:
 
 **This command is destructive.**
 
-The reconstructed official sequence is:
-
-1. write `0x00` to `0xFFFFFCFF` to enable EEPROM writing;
-2. write `0xFF` to `0xFFFFFC00` through `0xFFFFFC7F` in 16-byte blocks;
-3. write `0xFF` to `0xFFFFFCFF` to disable EEPROM writing again.
-
-The Python CLI requires explicit confirmation:
+The reconstructed official sequence enables EEPROM writing with `0xFFFFFCFF <- 0x00`, writes `0xFF` over `0xFFFFFC00..0xFFFFFC7F` in 16-byte blocks, and disables writing with `0xFFFFFCFF <- 0xFF`.
 
 ```bash
 ./sitcp-mpc-writer clear \
@@ -140,8 +140,6 @@ Do not run this on a device whose MPC/EEPROM contents must be preserved.
 
 ### Raw RBCP write
 
-A raw write command is provided for expert testing:
-
 ```bash
 ./sitcp-mpc-writer rbcp-write \
   --ip 192.168.10.10 \
@@ -150,11 +148,11 @@ A raw write command is provided for expert testing:
   --hex-data "01 02 03 04"
 ```
 
-This is not the MPC programming command. The user is responsible for choosing a safe address and value.
+This is an expert raw-access command, not the high-level MPC programming command.
 
 ## MPC writing status
 
-The intended final interface is deliberately simple and extension-independent:
+The intended final interface is extension-independent:
 
 ```bash
 ./sitcp-mpc-writer inspect FILE
@@ -164,11 +162,11 @@ The intended final interface is deliberately simple and extension-independent:
 
 `write` is currently disabled.
 
-Before high-level writing is enabled, the implementation will require file-payload classification, device compatibility validation, preservation of fields that the official Writer preserves, explicit write enable, exact mapped writes, read-back verification, and write-disable cleanup.
+Before it is enabled, the implementation must safely validate device compatibility, preserve fields that the official Writer preserves, perform the exact mapped writes, read back the result, and always restore EEPROM write protection.
 
 Read transactions may be retried after UDP timeouts. Writes are intentionally not blindly retried because a lost ACK does not prove that the target-side write failed.
 
-## Optional installation into a virtual environment
+## Optional virtual-environment installation
 
 ```bash
 python3 -m venv .venv
@@ -181,8 +179,6 @@ Do not use `sudo pip install` or `--break-system-packages` for this repository.
 
 ## Docker
 
-Build the image locally:
-
 ```bash
 docker build -t sitcp-mpcx-mpc-writer-python-first-trial .
 ```
@@ -194,16 +190,6 @@ docker run --rm \
   -v "$PWD:/work" \
   sitcp-mpcx-mpc-writer-python-first-trial \
   inspect /work/device.mpc
-```
-
-On Linux, direct access to a SiTCP device on the host network can normally be tested with:
-
-```bash
-docker run --rm \
-  --network host \
-  sitcp-mpcx-mpc-writer-python-first-trial \
-  verify /work/device.mpc \
-  --ip 192.168.10.10
 ```
 
 Docker Desktop networking on macOS differs from native Linux host networking. For initial hardware tests on a Mac, running the Python CLI directly on macOS is the simplest path.
@@ -228,17 +214,13 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
     └── test_rbcp.py
 ```
 
-`REVERSE_ENGINEERING.md` records addresses, constants, and behavior recovered from the official SiTCP MPC Writer XG binary. Implementation code should only be updated from behavior that has been verified there or against actual hardware/network captures.
-
 ## For Developers
-
-Run the tests without installing the package:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The project intentionally has no third-party runtime Python dependencies. RBCP communication uses the Python standard library.
+The project intentionally has no third-party runtime Python dependencies.
 
 Keep the high-level workflow safe:
 
@@ -258,12 +240,6 @@ read-back verification
 disable EEPROM write access
 ```
 
-Do not enable the high-level `write` command until the remaining write sequence and compatibility checks are verified.
-
-### Reverse-engineering reference
-
-The current implementation was developed by comparing public SiTCP/SiTCP-XG documentation with static analysis of the official Windows `SiTcpMpcWriteXG.exe` version `0.4.1-2` and read-only tests against real hardware.
+Do not enable the high-level `write` command until the remaining compatibility and write-sequence checks are verified.
 
 The official executable, proprietary libraries, and user-specific MPC files are **not** included in this repository.
-
-See `REVERSE_ENGINEERING.md` for the reconstructed technical details.
