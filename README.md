@@ -1,6 +1,6 @@
 # sitcp-mpcx-mpc-writer-python-first-trial
 
-Experimental cross-platform Python CLI for inspecting and eventually writing SiTCP / SiTCP-XG MPC data from macOS, Linux, WSL, and Docker without using the official Windows GUI.
+Experimental cross-platform Python CLI for inspecting, reading, verifying, and writing SiTCP / SiTCP-XG MPC data from macOS, Linux, WSL, and Docker without using the official Windows GUI.
 
 The user-facing commands are split by purpose:
 
@@ -14,27 +14,6 @@ RBCP UDP port `4660` is used by default, so it normally does not need to be writ
 
 The important design rule is that **SiTCP versus SiTCP-XG is determined from the 22-byte file payload, not from the filename extension**. An SiTCP-XG file may therefore be named `.mpc`; `.mpcx` is not required for detection.
 
-The current implementation can inspect MPC files, classify the payload using the same two decode paths reconstructed from the official Writer, communicate with SiTCP over RBCP, and verify the known EEPROM mappings on normal SiTCP and SiTCP-XG. High-level MPC programming is still intentionally disabled.
-
-## Where the format information comes from
-
-This project uses three evidence sources and keeps them separate:
-
-1. **Public Bee Beans Technologies documentation** — documents SiTCP/SiTCP-XG, RBCP-accessible internal/EEPROM areas, EEPROM write protection, and operation of the official MPC Writer.
-2. **Static analysis of the official `SiTcpMpcWriteXG.exe`** — recovered details not found in the reviewed public manuals, including the exact 22-byte length check, content classifier, RBCP packet handling, and XG record construction.
-3. **Read-only tests with matching real MPC files and hardware** — confirmed the normal-SiTCP and SiTCP-XG file-to-EEPROM mappings.
-
-Public references include:
-
-- SiTCP / SiTCP-XG downloads and manuals: https://www.bbtech.co.jp/download-files/sitcp/index_en.html
-- SiTCP MPC Writer XG guide: https://www.bbtech.co.jp/download-files/sitcp/SiTCP-MPC-Writer-XG-en.0.1.1.pdf
-- Bee Beans Technologies `sitcpy`: https://github.com/BeeBeansTechnologies/sitcpy
-- SiTCP Forum: https://sitcp.bbtech.co.jp/
-
-The public MPC Writer guide states that an MPCX file contains the SiTCP-XG global MAC address and license information and is written to EEPROM. However, the reviewed public documentation does **not** describe the complete byte-level 22-byte MPC payload format or the Writer's two-path content classifier. Those details were reconstructed from the Writer and checked against real hardware.
-
-See `REVERSE_ENGINEERING.md` for an evidence-by-evidence table.
-
 ## How to use
 
 No `pip install` is required for normal use:
@@ -44,6 +23,8 @@ git clone https://github.com/nobukoba/sitcp-mpcx-mpc-writer-python-first-trial.g
 cd sitcp-mpcx-mpc-writer-python-first-trial
 chmod +x mpc-mpcx-writer mpc-mpcx-reader mpc-mpcx-command
 ```
+
+Running any of the three commands without arguments prints its help text.
 
 ### Write an MPC/MPCX file
 
@@ -59,7 +40,46 @@ or, for a normal SiTCP device:
 
 The first argument is the target IP address and the second is the MPC/MPCX file. The file extension is not used to decide whether the payload is SiTCP or SiTCP-XG.
 
-**Actual MPC programming is still disabled in the current build.** The command is reserved as the final write interface so that the user-facing syntax will not need to change when programming is enabled.
+`mpc-mpcx-writer` now performs actual EEPROM programming. The sequence is:
+
+```text
+classify 22-byte MPC/MPCX payload
+    ↓
+read current EEPROM bytes that must be preserved
+    ↓
+enable EEPROM writes (0xFFFFFCFF <- 0x00)
+    ↓
+write EEPROM in 16-byte RBCP transactions
+    ↓
+disable EEPROM writes (0xFFFFFCFF <- 0xFF)
+    ↓
+read back EEPROM and verify byte-for-byte
+```
+
+Write transactions are deliberately **not automatically retried**. A lost UDP ACK does not prove that an EEPROM write failed, so blindly repeating a write is avoided.
+
+For SiTCP-XG, the 24-byte EEPROM record is constructed as:
+
+```text
+file[0:16]   -> EEPROM 0xFFFFFC00..0xFFFFFC0F
+FC10..FC11   -> preserve current EEPROM values
+file[16:22]  -> EEPROM 0xFFFFFC12..0xFFFFFC17
+```
+
+For normal SiTCP, the current `0xFFFFFC00..0xFFFFFC4F` image is read first and preserved except for:
+
+```text
+file[0:6]   -> EEPROM 0xFFFFFC12..0xFFFFFC17
+file[6:22]  -> EEPROM 0xFFFFFC40..0xFFFFFC4F
+```
+
+A successful write ends with:
+
+```text
+WRITE OK
+READ-BACK VERIFY OK
+EEPROM WRITE DISABLED
+```
 
 ### Read MPC-related EEPROM data
 
@@ -73,7 +93,7 @@ This is the normal read-only command. No MPC/MPCX file is required.
 
 Detailed inspection, verification, and RBCP operations are collected under `mpc-mpcx-command`.
 
-Verify a file against a device:
+Verify a file against a device without writing:
 
 ```bash
 ./mpc-mpcx-command verify 192.168.2.169 2F20880E82.mpcx
@@ -114,50 +134,39 @@ Clear the MPC EEPROM area:
 ./mpc-mpcx-command clear 192.168.10.10 --yes-really-clear
 ```
 
-**`clear` is destructive.** Do not run it on a device whose MPC/EEPROM contents must be preserved.
+**`clear` is destructive.**
 
-### Verification mapping
+### Non-default RBCP port / timeout
 
-Normal SiTCP mapping confirmed with a matching real device/file pair:
-
-```text
-file[0:6]   -> EEPROM 0xFFFFFC12..0xFFFFFC17
-file[6:22]  -> EEPROM 0xFFFFFC40..0xFFFFFC4F
-```
-
-SiTCP-XG mapping confirmed with a matching real device/file pair and static analysis of the official Writer:
-
-```text
-file[0:16]  -> EEPROM 0xFFFFFC00..0xFFFFFC0F
-FC10..FC11  -> preserved current device bytes
-file[16:22] -> EEPROM 0xFFFFFC12..0xFFFFFC17
-```
-
-A successful verification ends with:
-
-```text
-file matches EEPROM : YES
-NO WRITE PERFORMED
-```
-
-### Non-default RBCP port
-
-Port `4660` is used automatically. Specify `--port` only when the target uses another RBCP port:
+Port `4660` is used automatically. Specify `--port` only when the target uses another RBCP port. The writer also accepts `--timeout`:
 
 ```bash
-./mpc-mpcx-reader 192.168.2.169 --port 5000
+./mpc-mpcx-writer 192.168.2.169 2F20880E82.mpcx --timeout 3
 ```
 
-or:
+## Where the format information comes from
 
-```bash
-./mpc-mpcx-command verify 192.168.2.169 2F20880E82.mpcx --port 5000
-```
+This project uses three evidence sources and keeps them separate:
+
+1. **Public Bee Beans Technologies documentation** — documents SiTCP/SiTCP-XG, RBCP-accessible internal/EEPROM areas, EEPROM write protection, and operation of the official MPC Writer.
+2. **Static analysis of the official `SiTcpMpcWriteXG.exe`** — recovered details not found in the reviewed public manuals, including the exact 22-byte length check, content classifier, RBCP packet handling, and XG record construction.
+3. **Tests with matching real MPC files and hardware** — confirmed the normal-SiTCP and SiTCP-XG file-to-EEPROM mappings used here.
+
+Public references include:
+
+- SiTCP / SiTCP-XG downloads and manuals: https://www.bbtech.co.jp/download-files/sitcp/index_en.html
+- SiTCP MPC Writer XG guide: https://www.bbtech.co.jp/download-files/sitcp/SiTCP-MPC-Writer-XG-en.0.1.1.pdf
+- Bee Beans Technologies `sitcpy`: https://github.com/BeeBeansTechnologies/sitcpy
+- SiTCP Forum: https://sitcp.bbtech.co.jp/
+
+The public MPC Writer guide states that an MPCX file contains the SiTCP-XG global MAC address and license information and is written to EEPROM. The reviewed public documentation does not describe the complete byte-level 22-byte MPC payload format or the Writer's two-path content classifier; those details were reconstructed from the Writer and checked against real hardware.
+
+See `REVERSE_ENGINEERING.md` for details.
 
 ## Command summary
 
 ```text
-mpc-mpcx-writer IP FILE                 write MPC/MPCX (currently safety-disabled)
+mpc-mpcx-writer IP FILE                 write MPC/MPCX and verify by read-back
 mpc-mpcx-reader IP                      read MPC-related EEPROM area
 mpc-mpcx-command verify IP FILE         compare file with target EEPROM
 mpc-mpcx-command inspect FILE           inspect/classify a file
@@ -177,7 +186,7 @@ mpc-mpcx-reader --help
 mpc-mpcx-command --help
 ```
 
-Do not use `sudo pip install` or `--break-system-packages` for this repository.
+The project intentionally has no third-party runtime Python dependencies.
 
 ## Docker
 
@@ -208,33 +217,5 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
 └── tests/
     └── test_rbcp.py
 ```
-
-## For Developers
-
-```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-```
-
-The project intentionally has no third-party runtime Python dependencies.
-
-Keep the high-level workflow safe:
-
-```text
-classify file payload
-    ↓
-detect/check target device compatibility
-    ↓
-read and preserve current EEPROM state
-    ↓
-construct exact EEPROM writes
-    ↓
-explicit write operation
-    ↓
-read-back verification
-    ↓
-disable EEPROM write access
-```
-
-Do not enable the high-level write operation until the remaining compatibility and write-sequence checks are verified.
 
 The official executable, proprietary libraries, and user-specific MPC files are **not** included in this repository.
