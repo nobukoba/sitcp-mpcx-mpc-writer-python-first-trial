@@ -131,21 +131,23 @@ def cmd_write(args):
         f"target       : {args.ip}:{args.port}\n"
         f"file         : {path}\n"
         f"payload type : {kind}\n"
+        f"file payload : {payload.hex(' ')}\n"
         "programming EEPROM ..."
     )
 
     client = RbcpClient(args.ip, args.port, args.timeout)
-    image = program_mpc_payload(client, payload, info.writer_type)
+    readback = program_mpc_payload(client, payload, info.writer_type)
 
     if info.writer_type == 1:
         print(
-            f"preserved FC10..11 : {image[16:18].hex(' ')}\n"
-            f"written FC00..FC17 : {image.hex(' ')}"
+            f"preserved FC10..11  : {readback[16:18].hex(' ')}\n"
+            f"read-back FC00..17  : {readback.hex(' ')}\n"
+            f"read-back MAC       : {readback[18:24].hex(':')}"
         )
     else:
         print(
-            f"written MAC        : {image[0x12:0x18].hex(':')}\n"
-            f"written MPC block  : {image[0x40:0x50].hex(' ')}"
+            f"read-back MAC       : {readback[0x12:0x18].hex(':')}\n"
+            f"read-back FC40..4F  : {readback[0x40:0x50].hex(' ')}"
         )
 
     print("WRITE OK\nREAD-BACK VERIFY OK\nEEPROM WRITE DISABLED")
