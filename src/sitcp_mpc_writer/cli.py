@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 
-from .mpc import inspect_file
+from .mpc import inspect_file, build_mpcx_eeprom_record
 from .rbcp import RbcpClient, RbcpError
 from .eeprom import read_extension, clear_mpc_area
 
@@ -44,13 +45,34 @@ def cmd_rbcp_write(args: argparse.Namespace) -> int:
 
 def cmd_probe(args: argparse.Namespace) -> int:
     c = RbcpClient(args.ip, args.port, args.timeout)
-    try:
-        data = c.read(args.address, args.length)
-    except RbcpError as exc:
-        print(f"probe failed: {exc}", file=sys.stderr)
-        return 2
+    data = c.read(args.address, args.length)
     print(f"RBCP reachable: {args.ip}:{args.port}")
     print(f"read 0x{args.address:08x}+{args.length}: {data.hex(' ')}")
+    return 0
+
+
+def cmd_mpcx_plan(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    data = path.read_bytes()
+    if path.suffix.lower() != ".mpcx":
+        print("ERROR: mpcx-plan expects a .mpcx file", file=sys.stderr)
+        return 2
+    if len(data) != 22:
+        print(f"ERROR: MPCX must be exactly 22 bytes, got {len(data)}", file=sys.stderr)
+        return 2
+
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    preserved = c.read(0xFFFFFC10, 2)
+    record = build_mpcx_eeprom_record(data, preserved)
+
+    target_mac = record[18:24]
+    print(f"MPCX file        : {path}")
+    print(f"preserve FC10-11 : {preserved.hex(' ')}")
+    print(f"MPCX[0:16]       : {data[:16].hex(' ')}")
+    print(f"MPCX MAC         : {target_mac.hex(':')}")
+    print(f"EEPROM record    : {record.hex(' ')}")
+    print("EEPROM target    : 0xfffffc00..0xfffffc17 (24 bytes)")
+    print("NO WRITE PERFORMED")
     return 0
 
 
@@ -59,18 +81,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     print(f"file OK : {info.path} ({info.kind}, {info.size} bytes)")
     print(f"sha256  : {info.sha256}")
     print("device compatibility check: NOT IMPLEMENTED")
-    print(
-        "Reason: the public documentation does not specify the MPC/MPCX "
-        "compatibility algorithm or EEPROM programming register map."
-    )
     return 3
 
 
 def cmd_write_mpc(args: argparse.Namespace) -> int:
     print("REFUSED: MPC/MPCX EEPROM programming is not enabled in this build.", file=sys.stderr)
     print(
-        "The write sequence and file format must be verified from an official "
-        "specification or a captured transaction before enabling this command.",
+        "Use mpcx-plan to inspect the reconstructed 24-byte SiTCP-XG record without writing.",
         file=sys.stderr,
     )
     return 4
@@ -133,6 +150,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--timeout", type=float, default=1.0)
     q.set_defaults(func=cmd_eeprom_read)
 
+    q = sub.add_parser("mpcx-plan", help="build the reconstructed 24-byte SiTCP-XG EEPROM record without writing")
+    q.add_argument("file")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.set_defaults(func=cmd_mpcx_plan)
+
     q = sub.add_parser("clear", help="DESTRUCTIVE: reproduce official Clear MPC(X) EEPROM erase sequence")
     q.add_argument("--ip", required=True)
     q.add_argument("--port", type=int, default=4660)
@@ -156,7 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except RbcpError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
