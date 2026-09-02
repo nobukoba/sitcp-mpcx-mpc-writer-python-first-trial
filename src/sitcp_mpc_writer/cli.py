@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from .eeprom import clear_mpc_area, read_extension
+from .eeprom import clear_mpc_area, program_mpc_payload, read_extension
 from .mpc import build_mpcx_eeprom_record, inspect_file
 from .rbcp import RbcpClient, RbcpError, RbcpTimeout
 
@@ -120,10 +120,36 @@ def cmd_clear(args):
 
 def cmd_write(args):
     path = Path(args.file)
+    payload = path.read_bytes()
     info = inspect_file(path)
-    print(f"target       : {args.ip}:{args.port}\nfile         : {path}\npayload type : {info.kind}")
-    print("REFUSED: MPC programming is not enabled in this build.", file=sys.stderr)
-    return 4
+    if len(payload) != 22 or info.writer_type not in (1, 2):
+        print(f"ERROR: invalid/unknown 22-byte MPC payload (writer type {info.writer_type})", file=sys.stderr)
+        return 2
+
+    kind = "SiTCP-XG" if info.writer_type == 1 else "normal SiTCP"
+    print(
+        f"target       : {args.ip}:{args.port}\n"
+        f"file         : {path}\n"
+        f"payload type : {kind}\n"
+        "programming EEPROM ..."
+    )
+
+    client = RbcpClient(args.ip, args.port, args.timeout)
+    image = program_mpc_payload(client, payload, info.writer_type)
+
+    if info.writer_type == 1:
+        print(
+            f"preserved FC10..11 : {image[16:18].hex(' ')}\n"
+            f"written FC00..FC17 : {image.hex(' ')}"
+        )
+    else:
+        print(
+            f"written MAC        : {image[0x12:0x18].hex(':')}\n"
+            f"written MPC block  : {image[0x40:0x50].hex(' ')}"
+        )
+
+    print("WRITE OK\nREAD-BACK VERIFY OK\nEEPROM WRITE DISABLED")
+    return 0
 
 
 def _add_ip(parser, timeout=True):
@@ -134,8 +160,8 @@ def _add_ip(parser, timeout=True):
 
 
 def build_writer_parser():
-    parser = argparse.ArgumentParser(prog="mpc-mpcx-writer", description="Write an MPC/MPCX file to a target SiTCP/SiTCP-XG device.")
-    _add_ip(parser, timeout=False)
+    parser = argparse.ArgumentParser(prog="mpc-mpcx-writer", description="Write an MPC/MPCX file to a target SiTCP/SiTCP-XG device and verify it by read-back.")
+    _add_ip(parser)
     parser.add_argument("file", help="MPC/MPCX file")
     parser.set_defaults(func=cmd_write)
     return parser
@@ -171,7 +197,7 @@ def _run(parser, argv=None):
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (RbcpError, ValueError) as exc:
+    except (RbcpError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
