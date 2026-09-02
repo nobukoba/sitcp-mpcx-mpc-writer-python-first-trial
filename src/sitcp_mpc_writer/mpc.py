@@ -1,14 +1,32 @@
 """MPC/MPCX file inspection reconstructed from SiTcpMpcWriteXG 0.4.1-2.
 
 The official Writer requires exactly 22 bytes and tests two 7-byte decoded
-views of the file.  These rules are reconstructed from the x86 binary; fields
-that are not yet understood remain opaque.
+views of the file. These rules are reconstructed from the x86 binary.
+
+For SiTCP-XG, static analysis plus a matching real-device EEPROM dump shows
+that the 22-byte MPCX payload is written into a 24-byte EEPROM record at
+0xFFFFFC00 as follows:
+
+    MPCX[0:16]  -> EEPROM bytes 0..15
+    existing EEPROM bytes FC10..FC11 -> record bytes 16..17 (preserved)
+    MPCX[16:22] -> EEPROM bytes 18..23
+
+The two bytes at FC10..FC11 are therefore *not* constants from the MPCX file.
+The official Writer's assembly leaves the corresponding two-byte gap intact
+while copying the 22 MPCX bytes into its 24-byte write buffer.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
+
+
+MPC_FILE_SIZE = 22
+MPCX_EEPROM_RECORD_SIZE = 24
+MPCX_EEPROM_BASE = 0xFFFFFC00
+MPCX_PRESERVED_OFFSET = 16
+MPCX_PRESERVED_SIZE = 2
 
 
 def _valid_tag(buf: bytes) -> bool:
@@ -29,6 +47,24 @@ def _valid_tag(buf: bytes) -> bool:
 
 def _decode_nonzero(buf: bytes, delta: int) -> bytes:
     return bytes(((b - delta) & 0xFF) if b else 0 for b in buf)
+
+
+def build_mpcx_eeprom_record(mpcx: bytes, preserved_fc10_fc11: bytes) -> bytes:
+    """Build the reconstructed 24-byte SiTCP-XG EEPROM record.
+
+    This function does not perform any I/O. The two bytes corresponding to
+    EEPROM addresses 0xFFFFFC10..0xFFFFFC11 must be read from the target and
+    supplied explicitly; they are preserved by the official Writer rather
+    than taken from the 22-byte MPCX file.
+    """
+    if len(mpcx) != MPC_FILE_SIZE:
+        raise ValueError(f"MPCX must be exactly {MPC_FILE_SIZE} bytes, got {len(mpcx)}")
+    if len(preserved_fc10_fc11) != MPCX_PRESERVED_SIZE:
+        raise ValueError(
+            "preserved FC10..FC11 field must be exactly 2 bytes, "
+            f"got {len(preserved_fc10_fc11)}"
+        )
+    return mpcx[:16] + preserved_fc10_fc11 + mpcx[16:]
 
 
 @dataclass(frozen=True)
@@ -56,7 +92,7 @@ def inspect_file(path: str | Path, preview_bytes: int = 32) -> MpcInfo:
     else:
         kind = "unknown"
 
-    size_ok = len(data) == 22
+    size_ok = len(data) == MPC_FILE_SIZE
     writer_type = 0
     decoded_tag = None
     decoded_tag_hex = None
