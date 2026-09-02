@@ -10,14 +10,17 @@ from .mpc import (
     detect_eeprom_payload_type,
     inspect_file,
     payload_type_name,
+    reconstruct_normal_payload,
+    reconstruct_xg_payload,
 )
-from .rbcp import RbcpClient, RbcpError, RbcpTimeout
+from .rbcp import RbcpBusError, RbcpClient, RbcpError, RbcpTimeout
 
 
 FIELD_WIDTH = 20
 DEFAULT_TIMEOUT = 3.0
 EEPROM_BASE = 0xFFFFFC00
 EEPROM_READ_SIZE = 0x50
+XG_PROBE_ADDRESS = 0xFFFFFF50
 
 
 def _int_auto(value: str) -> int:
@@ -50,6 +53,28 @@ def _read_preserved_mpcx_bytes(client):
 
 def _read_detection_image(client):
     return _read_chunked(client, EEPROM_BASE, EEPROM_READ_SIZE, 8)
+
+
+def _detect_target_type(client, eeprom):
+    """Detect target generation, resolving ambiguous EEPROM payloads read-only.
+
+    First use the reconstructed 22-byte MPC/MPCX payloads.  Some normal SiTCP
+    EEPROMs can contain old/other data in FC00..FC0F that also looks like a
+    valid XG payload.  If both payload mappings classify, probe 0xFFFFFF50:
+    the XG Writer uses this internal XG register area, while the tested normal
+    SiTCP target returns an RBCP bus error there.
+    """
+    detected_type, detected_payload = detect_eeprom_payload_type(eeprom)
+    if detected_type != -1:
+        return detected_type, detected_payload, "EEPROM payload"
+
+    try:
+        _read_with_retry(client, XG_PROBE_ADDRESS, 1)
+    except RbcpBusError:
+        return 2, reconstruct_normal_payload(eeprom), "XG register probe: bus error"
+    except RbcpTimeout:
+        return -1, None, "XG register probe: timeout"
+    return 1, reconstruct_xg_payload(eeprom), "XG register probe: readable"
 
 
 def _format_ipv4(data: bytes) -> str:
@@ -140,18 +165,22 @@ def cmd_verify(args):
 
     client = RbcpClient(args.ip, args.port, args.timeout)
     eeprom = _read_detection_image(client)
-    device_type, _ = detect_eeprom_payload_type(eeprom)
+    device_type, _, detection = _detect_target_type(client, eeprom)
     _print_fields(
         ("command", "verify"),
         ("target", f"{args.ip}:{args.port}"),
         ("file", path),
         ("file type", payload_type_name(info.writer_type)),
         ("target type", payload_type_name(device_type)),
+        ("detection", detection),
         ("writer type", info.writer_type),
     )
 
     if device_type in (1, 2) and device_type != info.writer_type:
         _print_fields(("match", "NO"), ("status", "TARGET TYPE MISMATCH"))
+        return 7
+    if device_type not in (1, 2):
+        _print_fields(("match", "UNKNOWN"), ("status", "TARGET TYPE NOT DETECTED"))
         return 7
 
     if info.writer_type == 1:
@@ -212,7 +241,7 @@ def cmd_mpcx_plan(args):
 def cmd_read(args):
     client = RbcpClient(args.ip, args.port, args.timeout)
     eeprom = _read_detection_image(client)
-    detected_type, detected_payload = detect_eeprom_payload_type(eeprom)
+    detected_type, detected_payload, detection = _detect_target_type(client, eeprom)
     data = eeprom[0x10:0x50]
     mac = data[0x02:0x08]
     ip = data[0x08:0x0C]
@@ -224,6 +253,7 @@ def cmd_read(args):
         ("command", "read"),
         ("target", f"{args.ip}:{args.port}"),
         ("detected type", payload_type_name(detected_type)),
+        ("detection", detection),
         ("MAC", mac.hex(":")),
         ("IP", _format_ipv4(ip)),
         ("TCP port", tcp_port),
@@ -267,7 +297,7 @@ def cmd_write(args):
 
     client = RbcpClient(args.ip, args.port, args.timeout)
     eeprom = _read_detection_image(client)
-    device_type, _ = detect_eeprom_payload_type(eeprom)
+    device_type, _, detection = _detect_target_type(client, eeprom)
 
     _print_fields(
         ("command", "write"),
@@ -275,6 +305,7 @@ def cmd_write(args):
         ("file", path),
         ("file type", payload_type_name(info.writer_type)),
         ("target type", payload_type_name(device_type)),
+        ("detection", detection),
         ("writer type", info.writer_type),
         ("file payload", payload.hex(" ")),
     )
