@@ -205,7 +205,7 @@ def _add_ip(parser, timeout=True):
 
 def build_writer_parser():
     parser = argparse.ArgumentParser(
-        prog="mpcmpcx-writer",
+        prog="mpc-mpcx-writer",
         description="Write an MPC/MPCX file to a target SiTCP/SiTCP-XG device.",
     )
     _add_ip(parser, timeout=False)
@@ -216,7 +216,7 @@ def build_writer_parser():
 
 def build_reader_parser():
     parser = argparse.ArgumentParser(
-        prog="mpcmpcx-reader",
+        prog="mpc-mpcx-reader",
         description="Read the MPC-related EEPROM area from a SiTCP/SiTCP-XG device.",
     )
     _add_ip(parser)
@@ -226,7 +226,7 @@ def build_reader_parser():
 
 def build_command_parser():
     parser = argparse.ArgumentParser(
-        prog="mpcmpcx-command",
+        prog="mpc-mpcx-command",
         description="Advanced MPC/MPCX inspection, verification, and RBCP commands.",
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
