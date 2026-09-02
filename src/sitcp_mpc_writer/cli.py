@@ -37,6 +37,17 @@ def _read_preserved_mpcx_bytes(client):
         return _read_with_retry(client, 0xFFFFFC10, 1) + _read_with_retry(client, 0xFFFFFC11, 1)
 
 
+def _format_ipv4(data: bytes) -> str:
+    return ".".join(str(value) for value in data)
+
+
+def _format_eeprom_rows(data: bytes, base: int = 0xFFFFFC10, row_size: int = 16) -> str:
+    rows = []
+    for offset in range(0, len(data), row_size):
+        rows.append(f"{base + offset:08X}: {data[offset:offset + row_size].hex(' ')}")
+    return "\n".join(rows)
+
+
 def cmd_inspect(args):
     info = inspect_file(args.file, args.preview)
     print(f"file    : {info.path}\nkind    : {info.kind}\nsize    : {info.size} bytes\nsha256  : {info.sha256}\npreview : {info.preview_hex}")
@@ -105,7 +116,25 @@ def cmd_mpcx_plan(args):
 
 def cmd_read(args):
     data = read_extension(RbcpClient(args.ip, args.port, args.timeout))
-    print(data.hex(" "))
+    mac = data[0x02:0x08]
+    ip = data[0x08:0x0C]
+    tcp_port = int.from_bytes(data[0x0C:0x0E], "big")
+    mss = int.from_bytes(data[0x10:0x12], "big")
+    udp_port = int.from_bytes(data[0x12:0x14], "big")
+    mpc_block = data[0x30:0x40]
+
+    print(
+        f"target        : {args.ip}:{args.port}\n"
+        f"MAC           : {mac.hex(':')}\n"
+        f"IP            : {_format_ipv4(ip)}\n"
+        f"TCP port      : {tcp_port}\n"
+        f"MSS           : {mss}\n"
+        f"RBCP UDP port : {udp_port}\n"
+        f"FC10..FC11    : {data[0:2].hex(' ')}\n"
+        f"MPC FC40..4F  : {mpc_block.hex(' ')}\n"
+        "raw EEPROM FC10..FC4F:\n"
+        f"{_format_eeprom_rows(data)}"
+    )
     return 0
 
 
@@ -170,7 +199,7 @@ def build_writer_parser():
 
 
 def build_reader_parser():
-    parser = argparse.ArgumentParser(prog="mpc-mpcx-reader", description="Read the MPC-related EEPROM area from a SiTCP/SiTCP-XG device.")
+    parser = argparse.ArgumentParser(prog="mpc-mpcx-reader", description="Read and decode the MPC-related EEPROM area from a SiTCP/SiTCP-XG device.")
     _add_ip(parser)
     parser.set_defaults(func=cmd_read)
     return parser
@@ -181,7 +210,7 @@ def build_command_parser():
     subparsers = parser.add_subparsers(dest="cmd", required=True)
     q = subparsers.add_parser("inspect", help="inspect an MPC/MPCX file"); q.add_argument("file"); q.add_argument("--preview", type=int, default=32); q.set_defaults(func=cmd_inspect)
     q = subparsers.add_parser("verify", help="compare an MPC/MPCX file with target EEPROM"); _add_ip(q); q.add_argument("file"); q.set_defaults(func=cmd_verify)
-    q = subparsers.add_parser("read", help="read the MPC-related EEPROM area"); _add_ip(q); q.set_defaults(func=cmd_read)
+    q = subparsers.add_parser("read", help="read and decode the MPC-related EEPROM area"); _add_ip(q); q.set_defaults(func=cmd_read)
     q = subparsers.add_parser("probe", help="test RBCP connectivity"); _add_ip(q); q.add_argument("--address", type=_int_auto, required=True); q.add_argument("--length", type=int, default=1); q.set_defaults(func=cmd_probe)
     q = subparsers.add_parser("rbcp-read", help="expert raw RBCP read"); _add_ip(q); q.add_argument("--address", type=_int_auto, required=True); q.add_argument("--length", type=int, required=True); q.set_defaults(func=cmd_rbcp_read)
     q = subparsers.add_parser("rbcp-write", help="expert raw RBCP write"); _add_ip(q); q.add_argument("--address", type=_int_auto, required=True); q.add_argument("--hex-data", required=True); q.set_defaults(func=cmd_rbcp_write)
