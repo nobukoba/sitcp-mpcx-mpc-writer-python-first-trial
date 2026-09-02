@@ -1,17 +1,13 @@
-"""MPC/MPCX file inspection reconstructed from SiTcpMpcWriteXG 0.4.1-2.
+"""MPC/MPCX file and EEPROM classification reconstructed from SiTcpMpcWriteXG 0.4.1-2.
 
 The official Writer requires exactly 22 bytes and classifies the payload from
-its contents.  The filename extension is not used to decide whether the file
+its contents. The filename extension is not used to decide whether the file
 is for normal SiTCP or SiTCP-XG; an XG payload may therefore also be named
 *.mpc.
 
-For SiTCP-XG, static analysis plus a matching real-device EEPROM dump shows
-that the 22-byte payload is written into a 24-byte EEPROM record at
-0xFFFFFC00 as follows:
-
-    payload[0:16] -> EEPROM bytes 0..15
-    existing EEPROM bytes FC10..FC11 -> record bytes 16..17 (preserved)
-    payload[16:22] -> EEPROM bytes 18..23
+Known EEPROM mappings let us reconstruct both possible 22-byte payloads from
+a target EEPROM image and run the same content classifier on them. This is
+used for automatic MPC/MPCX target detection without relying on the filename.
 """
 from __future__ import annotations
 
@@ -24,6 +20,7 @@ MPCX_EEPROM_RECORD_SIZE = 24
 MPCX_EEPROM_BASE = 0xFFFFFC00
 MPCX_PRESERVED_OFFSET = 16
 MPCX_PRESERVED_SIZE = 2
+EEPROM_DETECT_SIZE = 0x50
 
 
 def _valid_tag(buf: bytes) -> bool:
@@ -45,7 +42,7 @@ def _decode_nonzero(buf: bytes, delta: int) -> bytes:
 
 
 def classify_payload(data: bytes) -> int:
-    """Return official Writer type: 1=XG, 2=normal SiTCP, 0=invalid/unknown."""
+    """Return official Writer type: 1=XG/MPCX, 2=normal SiTCP/MPC, 0=unknown."""
     if len(data) != MPC_FILE_SIZE:
         return 0
     a = _decode_nonzero(data[6:13], 0x34)
@@ -57,12 +54,56 @@ def classify_payload(data: bytes) -> int:
     return 0
 
 
+def payload_type_name(writer_type: int) -> str:
+    if writer_type == 1:
+        return "MPCX (SiTCP-XG)"
+    if writer_type == 2:
+        return "MPC (normal SiTCP)"
+    if writer_type == -1:
+        return "ambiguous"
+    return "unknown"
+
+
 def build_mpcx_eeprom_record(mpcx: bytes, preserved_fc10_fc11: bytes) -> bytes:
     if len(mpcx) != MPC_FILE_SIZE:
         raise ValueError(f"MPC/X payload must be exactly {MPC_FILE_SIZE} bytes, got {len(mpcx)}")
     if len(preserved_fc10_fc11) != MPCX_PRESERVED_SIZE:
         raise ValueError("preserved FC10..FC11 field must be exactly 2 bytes")
     return mpcx[:16] + preserved_fc10_fc11 + mpcx[16:]
+
+
+def reconstruct_xg_payload(eeprom_fc00_fc4f: bytes) -> bytes:
+    """Reconstruct the 22-byte XG/MPCX payload from EEPROM FC00..FC4F."""
+    if len(eeprom_fc00_fc4f) < EEPROM_DETECT_SIZE:
+        raise ValueError("EEPROM image must contain FC00..FC4F (80 bytes)")
+    return eeprom_fc00_fc4f[0:16] + eeprom_fc00_fc4f[18:24]
+
+
+def reconstruct_normal_payload(eeprom_fc00_fc4f: bytes) -> bytes:
+    """Reconstruct the 22-byte normal-SiTCP/MPC payload from EEPROM FC00..FC4F."""
+    if len(eeprom_fc00_fc4f) < EEPROM_DETECT_SIZE:
+        raise ValueError("EEPROM image must contain FC00..FC4F (80 bytes)")
+    return eeprom_fc00_fc4f[0x12:0x18] + eeprom_fc00_fc4f[0x40:0x50]
+
+
+def detect_eeprom_payload_type(eeprom_fc00_fc4f: bytes) -> tuple[int, bytes | None]:
+    """Auto-detect target type using reconstructed payloads and the Writer classifier.
+
+    Returns ``(1, xg_payload)`` for MPCX/SiTCP-XG, ``(2, normal_payload)`` for
+    MPC/normal SiTCP, ``(0, None)`` if neither mapping classifies, and
+    ``(-1, None)`` if both classify and the result is ambiguous.
+    """
+    xg_payload = reconstruct_xg_payload(eeprom_fc00_fc4f)
+    normal_payload = reconstruct_normal_payload(eeprom_fc00_fc4f)
+    xg_ok = classify_payload(xg_payload) == 1
+    normal_ok = classify_payload(normal_payload) == 2
+    if xg_ok and not normal_ok:
+        return 1, xg_payload
+    if normal_ok and not xg_ok:
+        return 2, normal_payload
+    if xg_ok and normal_ok:
+        return -1, None
+    return 0, None
 
 
 @dataclass(frozen=True)
