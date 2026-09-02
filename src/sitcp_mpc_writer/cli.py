@@ -16,7 +16,7 @@ def _int_auto(value: str) -> int:
 def _read_with_retry(c: RbcpClient, address: int, length: int, attempts: int = 3) -> bytes:
     """Retry a read-only RBCP transaction after transient UDP timeouts.
 
-    Reads are safe to repeat.  Writes are intentionally not retried here because
+    Reads are safe to repeat. Writes are intentionally not retried here because
     a lost ACK does not prove that the target failed to perform the write.
     """
     last_error: RbcpTimeout | None = None
@@ -29,10 +29,26 @@ def _read_with_retry(c: RbcpClient, address: int, length: int, attempts: int = 3
     raise last_error
 
 
+def _read_chunked(c: RbcpClient, address: int, length: int, chunk_size: int = 8) -> bytes:
+    """Read a range using small read-only RBCP transactions.
+
+    Small chunks are used because real SiTCP/SiTCP-XG EEPROM reads have shown
+    occasional length/timing sensitivity. Each chunk also gets the normal
+    read-only timeout retry policy.
+    """
+    out = bytearray()
+    offset = 0
+    while offset < length:
+        n = min(chunk_size, length - offset)
+        out.extend(_read_with_retry(c, address + offset, n))
+        offset += n
+    return bytes(out)
+
+
 def _read_preserved_mpcx_bytes(c: RbcpClient) -> bytes:
     """Read FC10-11 robustly for the reconstructed XG 24-byte record.
 
-    Prefer one 2-byte request.  If that repeatedly times out, fall back to two
+    Prefer one 2-byte request. If that repeatedly times out, fall back to two
     independent one-byte reads; real XG hardware has shown occasional timeout
     sensitivity depending on EEPROM read length/transaction timing.
     """
@@ -108,6 +124,48 @@ def cmd_mpcx_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mpc_verify(args: argparse.Namespace) -> int:
+    """Verify a normal SiTCP .mpc file against the confirmed EEPROM fields."""
+    path = Path(args.file)
+    data = path.read_bytes()
+    info = inspect_file(path)
+
+    if path.suffix.lower() != ".mpc":
+        print("ERROR: mpc-verify expects a .mpc file", file=sys.stderr)
+        return 2
+    if len(data) != 22:
+        print(f"ERROR: MPC must be exactly 22 bytes, got {len(data)}", file=sys.stderr)
+        return 2
+    if info.writer_type != 2:
+        print(
+            f"ERROR: official Writer classifier reports type {info.writer_type}, expected type 2 for normal SiTCP MPC",
+            file=sys.stderr,
+        )
+        return 2
+
+    c = RbcpClient(args.ip, args.port, args.timeout)
+    eeprom_mac = _read_chunked(c, 0xFFFFFC12, 6, chunk_size=6)
+    eeprom_block = _read_chunked(c, 0xFFFFFC40, 16, chunk_size=8)
+
+    file_mac = data[0:6]
+    file_block = data[6:22]
+    mac_match = file_mac == eeprom_mac
+    block_match = file_block == eeprom_block
+    matched = mac_match and block_match
+
+    print(f"MPC file            : {path}")
+    print(f"writer type         : {info.writer_type} (normal SiTCP)")
+    print(f"MPC MAC             : {file_mac.hex(':')}")
+    print(f"EEPROM FC12..FC17   : {eeprom_mac.hex(':')}")
+    print(f"MAC match           : {'YES' if mac_match else 'NO'}")
+    print(f"MPC[6:22]           : {file_block.hex(' ')}")
+    print(f"EEPROM FC40..FC4F   : {eeprom_block.hex(' ')}")
+    print(f"MPC block match     : {'YES' if block_match else 'NO'}")
+    print(f"MPC matches EEPROM  : {'YES' if matched else 'NO'}")
+    print("NO WRITE PERFORMED")
+    return 0 if matched else 6
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     info = inspect_file(args.file)
     print(f"file OK : {info.path} ({info.kind}, {info.size} bytes)")
@@ -119,7 +177,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 def cmd_write_mpc(args: argparse.Namespace) -> int:
     print("REFUSED: MPC/MPCX EEPROM programming is not enabled in this build.", file=sys.stderr)
     print(
-        "Use mpcx-plan to inspect the reconstructed 24-byte SiTCP-XG record without writing.",
+        "Use mpcx-plan or mpc-verify to inspect/verify mappings without writing.",
         file=sys.stderr,
     )
     return 4
@@ -188,6 +246,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--port", type=int, default=4660)
     q.add_argument("--timeout", type=float, default=1.0)
     q.set_defaults(func=cmd_mpcx_plan)
+
+    q = sub.add_parser("mpc-verify", help="verify a normal SiTCP .mpc file against EEPROM without writing")
+    q.add_argument("file")
+    q.add_argument("--ip", required=True)
+    q.add_argument("--port", type=int, default=4660)
+    q.add_argument("--timeout", type=float, default=1.0)
+    q.set_defaults(func=cmd_mpc_verify)
 
     q = sub.add_parser("clear", help="DESTRUCTIVE: reproduce official Clear MPC(X) EEPROM erase sequence")
     q.add_argument("--ip", required=True)
