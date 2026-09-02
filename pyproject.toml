@@ -12,7 +12,9 @@ authors = [{name = "Nobuyuki Kobayashi et al."}]
 dependencies = []
 
 [project.scripts]
-mpcx-mpc-writer = "sitcp_mpc_writer.cli:main"
+mpcmpcx-writer = "sitcp_mpc_writer.cli:main_writer"
+mpcmpcx-reader = "sitcp_mpc_writer.cli:main_reader"
+mpcmpcx-command = "sitcp_mpc_writer.cli:main_command"
 
 [tool.setuptools.packages.find]
 where = ["src"]
