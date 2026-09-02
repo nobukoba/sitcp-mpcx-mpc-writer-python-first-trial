@@ -73,11 +73,12 @@ def cmd_clear(a):
 def cmd_write(a): print('REFUSED: MPC programming is not enabled in this build.',file=sys.stderr); return 4
 
 def _netargs(q, timeout=True):
-    q.add_argument('--ip',required=True); q.add_argument('--port',type=int,default=4660)
+    q.add_argument('ip',help='target SiTCP/SiTCP-XG IP address')
+    q.add_argument('--port',type=int,default=4660,help='RBCP UDP port (default: 4660)')
     if timeout: q.add_argument('--timeout',type=float,default=1.0)
 
 def build_parser():
-    p=argparse.ArgumentParser(prog='sitcp-mpc-writer'); s=p.add_subparsers(dest='cmd',required=True)
+    p=argparse.ArgumentParser(prog='mpcx-mpc-writer'); s=p.add_subparsers(dest='cmd',required=True)
     q=s.add_parser('inspect'); q.add_argument('file'); q.add_argument('--preview',type=int,default=32); q.set_defaults(func=cmd_inspect)
     q=s.add_parser('verify',help='auto-detect normal SiTCP vs SiTCP-XG from 22-byte payload and verify EEPROM'); q.add_argument('file'); _netargs(q); q.set_defaults(func=cmd_verify)
     q=s.add_parser('probe'); _netargs(q); q.add_argument('--address',type=_int_auto,required=True); q.add_argument('--length',type=int,default=1); q.set_defaults(func=cmd_probe)
