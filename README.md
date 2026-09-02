@@ -4,9 +4,17 @@ Experimental cross-platform Python CLI for inspecting and eventually writing SiT
 
 The command name is **`mpcx-mpc-writer`**.
 
+The intended normal operation is deliberately simple:
+
+```bash
+./mpcx-mpc-writer 192.168.2.169 2F20880E82.mpcx
+```
+
+The first argument is the target IP address and the second is the MPC/MPCX file. RBCP UDP port `4660` is used by default, so it normally does not need to be written on the command line.
+
 The important design rule is that **SiTCP versus SiTCP-XG is determined from the 22-byte file payload, not from the filename extension**. An SiTCP-XG file may therefore be named `.mpc`; `.mpcx` is not required for detection.
 
-The current implementation can inspect MPC files, classify the payload using the same two decode paths reconstructed from the official Writer, communicate with SiTCP over RBCP, and verify the known EEPROM mappings on normal SiTCP and SiTCP-XG. High-level MPC programming is still intentionally disabled.
+The current implementation can inspect MPC files, classify the payload using the same two decode paths reconstructed from the official Writer, communicate with SiTCP over RBCP, and verify the known EEPROM mappings on normal SiTCP and SiTCP-XG. High-level MPC programming is still intentionally disabled, so the default `IP FILE` command currently reports the planned target/file and refuses the actual write.
 
 ## Where the format information comes from
 
@@ -38,35 +46,40 @@ chmod +x mpcx-mpc-writer
 ./mpcx-mpc-writer --help
 ```
 
-For commands that access hardware, the target IP address is a positional argument. The RBCP UDP port defaults to `4660`, so `--port` normally does not need to be specified.
+### Write an MPC/MPCX file
 
-### Inspect a file
+The main interface is:
 
 ```bash
-./mpcx-mpc-writer inspect ./device.mpc
+./mpcx-mpc-writer DEVICE_IP FILE
 ```
 
-The current classifier reproduces the official Writer's two decode paths:
+For example:
 
-```text
-writer type 1 -> SiTCP-XG payload
-writer type 2 -> normal SiTCP payload
+```bash
+./mpcx-mpc-writer 192.168.2.169 2F20880E82.mpcx
 ```
 
-The filename extension is ignored for this classification.
+or, for a normal SiTCP device:
+
+```bash
+./mpcx-mpc-writer 192.168.2.161 2F20880E6E.mpc
+```
+
+The file extension is not used to decide whether the payload is SiTCP or SiTCP-XG.
+
+**Actual MPC programming is still disabled in the current build.** The command is already reserved as the final write interface so that the user-facing syntax will not need to change when programming is enabled.
 
 ### Verify a file against a device
 
-Use the same command for both generations:
-
 ```bash
-./mpcx-mpc-writer verify ./device.mpc 192.168.2.161
+./mpcx-mpc-writer verify 192.168.2.169 2F20880E82.mpcx
 ```
 
 or:
 
 ```bash
-./mpcx-mpc-writer verify ./device.mpcx 192.168.2.169
+./mpcx-mpc-writer verify 192.168.2.161 2F20880E6E.mpc
 ```
 
 The command classifies the 22-byte payload and selects the corresponding verified EEPROM mapping. No write is performed.
@@ -93,6 +106,27 @@ file matches EEPROM : YES
 NO WRITE PERFORMED
 ```
 
+### Read MPC-related EEPROM data
+
+```bash
+./mpcx-mpc-writer read 192.168.2.169
+```
+
+`read` replaces the older development-style `eeprom-read` command name.
+
+### Inspect a file without hardware
+
+```bash
+./mpcx-mpc-writer inspect 2F20880E82.mpcx
+```
+
+The classifier reproduces the official Writer's two decode paths:
+
+```text
+writer type 1 -> SiTCP-XG payload
+writer type 2 -> normal SiTCP payload
+```
+
 ### Check RBCP connectivity
 
 ```bash
@@ -100,7 +134,7 @@ NO WRITE PERFORMED
   --address 0x00000000
 ```
 
-### Read raw RBCP data
+### Expert raw RBCP access
 
 ```bash
 ./mpcx-mpc-writer rbcp-read 192.168.10.10 \
@@ -108,11 +142,13 @@ NO WRITE PERFORMED
   --length 16
 ```
 
-### Read EEPROM area
-
 ```bash
-./mpcx-mpc-writer eeprom-read 192.168.10.10
+./mpcx-mpc-writer rbcp-write 192.168.10.10 \
+  --address 0x12345678 \
+  --hex-data "01 02 03 04"
 ```
+
+These are development/debug commands rather than the normal MPC Writer interface.
 
 ### Clear the MPC EEPROM area
 
@@ -126,39 +162,24 @@ The reconstructed official sequence enables EEPROM writing with `0xFFFFFCFF <- 0
 
 Do not run this on a device whose MPC/EEPROM contents must be preserved.
 
-### Raw RBCP write
-
-```bash
-./mpcx-mpc-writer rbcp-write 192.168.10.10 \
-  --address 0x12345678 \
-  --hex-data "01 02 03 04"
-```
-
-This is an expert raw-access command, not the high-level MPC programming command.
-
 ### Non-default RBCP port
 
 Port `4660` is used automatically. Specify `--port` only when the target uses another RBCP port:
 
 ```bash
-./mpcx-mpc-writer probe 192.168.10.10 --port 5000 --address 0x00000000
+./mpcx-mpc-writer verify 192.168.2.169 2F20880E82.mpcx --port 5000
 ```
 
-## MPC writing status
+## Command summary
 
-The intended final interface is extension-independent:
-
-```bash
-./mpcx-mpc-writer inspect FILE
-./mpcx-mpc-writer verify FILE DEVICE_IP
-./mpcx-mpc-writer write FILE DEVICE_IP
+```text
+mpcx-mpc-writer IP FILE              write MPC/MPCX (currently safety-disabled)
+mpcx-mpc-writer verify IP FILE       compare file with target EEPROM
+mpcx-mpc-writer read IP              read MPC-related EEPROM area
+mpcx-mpc-writer inspect FILE         inspect/classify file only
 ```
 
-`write` is currently disabled.
-
-Before it is enabled, the implementation must safely validate device compatibility, preserve fields that the official Writer preserves, perform the exact mapped writes, read back the result, and always restore EEPROM write protection.
-
-Read transactions may be retried after UDP timeouts. Writes are intentionally not blindly retried because a lost ACK does not prove that the target-side write failed.
+Advanced/debug commands remain available as `probe`, `rbcp-read`, `rbcp-write`, `mpcx-plan`, and `clear`.
 
 ## Optional virtual-environment installation
 
@@ -234,6 +255,6 @@ read-back verification
 disable EEPROM write access
 ```
 
-Do not enable the high-level `write` command until the remaining compatibility and write-sequence checks are verified.
+Do not enable the high-level write operation until the remaining compatibility and write-sequence checks are verified.
 
 The official executable, proprietary libraries, and user-specific MPC files are **not** included in this repository.
