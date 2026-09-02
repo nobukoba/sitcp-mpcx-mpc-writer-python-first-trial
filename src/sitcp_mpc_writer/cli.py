@@ -4,12 +4,20 @@ import argparse
 from pathlib import Path
 import sys
 
-from .eeprom import clear_mpc_area, program_mpc_payload, read_extension
-from .mpc import build_mpcx_eeprom_record, inspect_file
+from .eeprom import clear_mpc_area, program_mpc_payload
+from .mpc import (
+    build_mpcx_eeprom_record,
+    detect_eeprom_payload_type,
+    inspect_file,
+    payload_type_name,
+)
 from .rbcp import RbcpClient, RbcpError, RbcpTimeout
 
 
 FIELD_WIDTH = 20
+DEFAULT_TIMEOUT = 3.0
+EEPROM_BASE = 0xFFFFFC00
+EEPROM_READ_SIZE = 0x50
 
 
 def _int_auto(value: str) -> int:
@@ -40,11 +48,15 @@ def _read_preserved_mpcx_bytes(client):
         return _read_with_retry(client, 0xFFFFFC10, 1) + _read_with_retry(client, 0xFFFFFC11, 1)
 
 
+def _read_detection_image(client):
+    return _read_chunked(client, EEPROM_BASE, EEPROM_READ_SIZE, 8)
+
+
 def _format_ipv4(data: bytes) -> str:
     return ".".join(str(value) for value in data)
 
 
-def _format_eeprom_rows(data: bytes, base: int = 0xFFFFFC10, row_size: int = 16) -> str:
+def _format_eeprom_rows(data: bytes, base: int, row_size: int = 16) -> str:
     rows = []
     for offset in range(0, len(data), row_size):
         rows.append(f"{base + offset:08X}: {data[offset:offset + row_size].hex(' ')}")
@@ -66,7 +78,7 @@ def cmd_inspect(args):
     _print_fields(
         ("command", "inspect"),
         ("file", info.path),
-        ("payload type", info.kind),
+        ("payload type", payload_type_name(info.writer_type)),
         ("size", f"{info.size} bytes"),
         ("writer type", info.writer_type),
         ("writer size valid", info.writer_size_valid),
@@ -127,19 +139,25 @@ def cmd_verify(args):
         return 2
 
     client = RbcpClient(args.ip, args.port, args.timeout)
-    kind = "SiTCP-XG" if info.writer_type == 1 else "normal SiTCP"
+    eeprom = _read_detection_image(client)
+    device_type, _ = detect_eeprom_payload_type(eeprom)
     _print_fields(
         ("command", "verify"),
         ("target", f"{args.ip}:{args.port}"),
         ("file", path),
-        ("payload type", kind),
+        ("file type", payload_type_name(info.writer_type)),
+        ("target type", payload_type_name(device_type)),
         ("writer type", info.writer_type),
     )
 
+    if device_type in (1, 2) and device_type != info.writer_type:
+        _print_fields(("match", "NO"), ("status", "TARGET TYPE MISMATCH"))
+        return 7
+
     if info.writer_type == 1:
-        preserved = _read_preserved_mpcx_bytes(client)
+        preserved = eeprom[0x10:0x12]
         expected = build_mpcx_eeprom_record(data, preserved)
-        actual = _read_chunked(client, 0xFFFFFC00, 24, 8)
+        actual = eeprom[0:24]
         matched = expected == actual
         _print_fields(
             ("preserved FC10..FC11", preserved.hex(" ")),
@@ -150,8 +168,8 @@ def cmd_verify(args):
             ("status", "VERIFY OK" if matched else "VERIFY FAILED"),
         )
     else:
-        mac = _read_chunked(client, 0xFFFFFC12, 6, 6)
-        block = _read_chunked(client, 0xFFFFFC40, 16, 8)
+        mac = eeprom[0x12:0x18]
+        block = eeprom[0x40:0x50]
         mac_ok = data[:6] == mac
         block_ok = data[6:] == block
         matched = mac_ok and block_ok
@@ -183,7 +201,7 @@ def cmd_mpcx_plan(args):
         ("command", "mpcx-plan"),
         ("target", f"{args.ip}:{args.port}"),
         ("file", path),
-        ("payload type", "SiTCP-XG"),
+        ("payload type", payload_type_name(info.writer_type)),
         ("preserved FC10..FC11", preserved.hex(" ")),
         ("EEPROM record", record.hex(" ")),
         ("status", "NO WRITE PERFORMED"),
@@ -192,27 +210,36 @@ def cmd_mpcx_plan(args):
 
 
 def cmd_read(args):
-    data = read_extension(RbcpClient(args.ip, args.port, args.timeout))
+    client = RbcpClient(args.ip, args.port, args.timeout)
+    eeprom = _read_detection_image(client)
+    detected_type, detected_payload = detect_eeprom_payload_type(eeprom)
+    data = eeprom[0x10:0x50]
     mac = data[0x02:0x08]
     ip = data[0x08:0x0C]
     tcp_port = int.from_bytes(data[0x0C:0x0E], "big")
     mss = int.from_bytes(data[0x10:0x12], "big")
     udp_port = int.from_bytes(data[0x12:0x14], "big")
-    mpc_block = data[0x30:0x40]
 
-    _print_fields(
+    rows = [
         ("command", "read"),
         ("target", f"{args.ip}:{args.port}"),
+        ("detected type", payload_type_name(detected_type)),
         ("MAC", mac.hex(":")),
         ("IP", _format_ipv4(ip)),
         ("TCP port", tcp_port),
         ("MSS", mss),
         ("RBCP UDP port", udp_port),
         ("FC10..FC11", data[0:2].hex(" ")),
-        ("MPC FC40..FC4F", mpc_block.hex(" ")),
-        ("status", "READ OK"),
-    )
-    _print_raw("raw EEPROM FC10..FC4F", data, 0xFFFFFC10)
+    ]
+    if detected_payload is not None:
+        rows.append(("reconstructed payload", detected_payload.hex(" ")))
+    if detected_type == 1:
+        rows.append(("MPCX FC00..FC0F", eeprom[0:16].hex(" ")))
+    elif detected_type == 2:
+        rows.append(("MPC FC40..FC4F", eeprom[0x40:0x50].hex(" ")))
+    rows.append(("status", "READ OK"))
+    _print_fields(*rows)
+    _print_raw("raw EEPROM FC00..FC4F", eeprom, EEPROM_BASE)
     return 0
 
 
@@ -238,18 +265,28 @@ def cmd_write(args):
         print(f"ERROR: invalid/unknown 22-byte MPC payload (writer type {info.writer_type})", file=sys.stderr)
         return 2
 
-    kind = "SiTCP-XG" if info.writer_type == 1 else "normal SiTCP"
+    client = RbcpClient(args.ip, args.port, args.timeout)
+    eeprom = _read_detection_image(client)
+    device_type, _ = detect_eeprom_payload_type(eeprom)
+
     _print_fields(
         ("command", "write"),
         ("target", f"{args.ip}:{args.port}"),
         ("file", path),
-        ("payload type", kind),
+        ("file type", payload_type_name(info.writer_type)),
+        ("target type", payload_type_name(device_type)),
         ("writer type", info.writer_type),
         ("file payload", payload.hex(" ")),
-        ("operation", "programming EEPROM"),
     )
 
-    client = RbcpClient(args.ip, args.port, args.timeout)
+    if device_type in (1, 2) and device_type != info.writer_type:
+        _print_fields(("status", "REFUSED: TARGET TYPE MISMATCH"))
+        return 7
+    if device_type not in (1, 2):
+        _print_fields(("status", "REFUSED: TARGET TYPE NOT DETECTED"))
+        return 7
+
+    _print_fields(("operation", "programming EEPROM"))
     readback = program_mpc_payload(client, payload, info.writer_type)
 
     if info.writer_type == 1:
@@ -278,13 +315,18 @@ def _add_ip(parser, timeout=True):
     parser.add_argument("ip", help="target SiTCP/SiTCP-XG IP address")
     parser.add_argument("--port", type=int, default=4660, help="RBCP UDP port (default: 4660)")
     if timeout:
-        parser.add_argument("--timeout", type=float, default=1.0)
+        parser.add_argument(
+            "--timeout",
+            type=float,
+            default=DEFAULT_TIMEOUT,
+            help=f"RBCP timeout in seconds (default: {DEFAULT_TIMEOUT:g})",
+        )
 
 
 def build_writer_parser():
     parser = argparse.ArgumentParser(
         prog="mpc-mpcx-writer",
-        description="Write an MPC/MPCX file to a target SiTCP/SiTCP-XG device and verify it by read-back.",
+        description="Auto-detect MPC/MPCX, write to a compatible target, and verify by read-back.",
     )
     _add_ip(parser)
     parser.add_argument("file", help="MPC/MPCX file")
@@ -295,7 +337,7 @@ def build_writer_parser():
 def build_reader_parser():
     parser = argparse.ArgumentParser(
         prog="mpc-mpcx-reader",
-        description="Read and decode the MPC-related EEPROM area from a SiTCP/SiTCP-XG device.",
+        description="Auto-detect MPC/MPCX and read/decode the target EEPROM.",
     )
     _add_ip(parser)
     parser.set_defaults(func=cmd_read)
@@ -309,17 +351,17 @@ def build_command_parser():
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
-    q = subparsers.add_parser("inspect", help="inspect an MPC/MPCX file")
+    q = subparsers.add_parser("inspect", help="inspect and auto-classify an MPC/MPCX file")
     q.add_argument("file")
     q.add_argument("--preview", type=int, default=32)
     q.set_defaults(func=cmd_inspect)
 
-    q = subparsers.add_parser("verify", help="compare an MPC/MPCX file with target EEPROM")
+    q = subparsers.add_parser("verify", help="auto-detect and compare an MPC/MPCX file with target EEPROM")
     _add_ip(q)
     q.add_argument("file")
     q.set_defaults(func=cmd_verify)
 
-    q = subparsers.add_parser("read", help="read and decode the MPC-related EEPROM area")
+    q = subparsers.add_parser("read", help="auto-detect and decode the MPC-related EEPROM area")
     _add_ip(q)
     q.set_defaults(func=cmd_read)
 
