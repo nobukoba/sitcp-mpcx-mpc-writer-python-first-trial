@@ -9,18 +9,6 @@ from .mpc import build_mpcx_eeprom_record, inspect_file
 from .rbcp import RbcpClient, RbcpError, RbcpTimeout
 
 
-KNOWN_COMMANDS = {
-    "inspect",
-    "verify",
-    "read",
-    "probe",
-    "rbcp-read",
-    "rbcp-write",
-    "mpcx-plan",
-    "clear",
-}
-
-
 def _int_auto(value: str) -> int:
     return int(value, 0)
 
@@ -203,7 +191,7 @@ def cmd_write(args):
     return 4
 
 
-def _netargs(parser, timeout=True):
+def _add_ip(parser, timeout=True):
     parser.add_argument("ip", help="target SiTCP/SiTCP-XG IP address")
     parser.add_argument(
         "--port",
@@ -215,13 +203,31 @@ def _netargs(parser, timeout=True):
         parser.add_argument("--timeout", type=float, default=1.0)
 
 
-def build_parser():
+def build_writer_parser():
     parser = argparse.ArgumentParser(
-        prog="mpcx-mpc-writer",
-        description=(
-            "MPC/MPCX writer and inspection tools. "
-            "Default write syntax: mpcx-mpc-writer IP FILE"
-        ),
+        prog="mpcmpcx-writer",
+        description="Write an MPC/MPCX file to a target SiTCP/SiTCP-XG device.",
+    )
+    _add_ip(parser, timeout=False)
+    parser.add_argument("file", help="MPC/MPCX file")
+    parser.set_defaults(func=cmd_write)
+    return parser
+
+
+def build_reader_parser():
+    parser = argparse.ArgumentParser(
+        prog="mpcmpcx-reader",
+        description="Read the MPC-related EEPROM area from a SiTCP/SiTCP-XG device.",
+    )
+    _add_ip(parser)
+    parser.set_defaults(func=cmd_read)
+    return parser
+
+
+def build_command_parser():
+    parser = argparse.ArgumentParser(
+        prog="mpcmpcx-command",
+        description="Advanced MPC/MPCX inspection, verification, and RBCP commands.",
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
@@ -231,28 +237,28 @@ def build_parser():
     q.set_defaults(func=cmd_inspect)
 
     q = subparsers.add_parser("verify", help="compare an MPC/MPCX file with target EEPROM")
-    _netargs(q)
+    _add_ip(q)
     q.add_argument("file")
     q.set_defaults(func=cmd_verify)
 
     q = subparsers.add_parser("read", help="read the MPC-related EEPROM area")
-    _netargs(q)
+    _add_ip(q)
     q.set_defaults(func=cmd_read)
 
     q = subparsers.add_parser("probe", help="test RBCP connectivity")
-    _netargs(q)
+    _add_ip(q)
     q.add_argument("--address", type=_int_auto, required=True)
     q.add_argument("--length", type=int, default=1)
     q.set_defaults(func=cmd_probe)
 
     q = subparsers.add_parser("rbcp-read", help="expert raw RBCP read")
-    _netargs(q)
+    _add_ip(q)
     q.add_argument("--address", type=_int_auto, required=True)
     q.add_argument("--length", type=int, required=True)
     q.set_defaults(func=cmd_rbcp_read)
 
     q = subparsers.add_parser("rbcp-write", help="expert raw RBCP write")
-    _netargs(q)
+    _add_ip(q)
     q.add_argument("--address", type=_int_auto, required=True)
     q.add_argument("--hex-data", required=True)
     q.set_defaults(func=cmd_rbcp_write)
@@ -261,40 +267,20 @@ def build_parser():
         "mpcx-plan",
         help="legacy/development XG plan command; classification is content-based",
     )
-    _netargs(q)
+    _add_ip(q)
     q.add_argument("file")
     q.set_defaults(func=cmd_mpcx_plan)
 
     q = subparsers.add_parser("clear", help="destructively clear MPC EEPROM area")
-    _netargs(q)
+    _add_ip(q)
     q.add_argument("--yes-really-clear", action="store_true")
     q.set_defaults(func=cmd_clear)
 
     return parser
 
 
-def build_default_write_parser():
-    parser = argparse.ArgumentParser(
-        prog="mpcx-mpc-writer",
-        description="Write an MPC/MPCX file to a target device.",
-    )
-    _netargs(parser, timeout=False)
-    parser.add_argument("file")
-    parser.set_defaults(func=cmd_write)
-    return parser
-
-
-def parse_args(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-
-    if argv and not argv[0].startswith("-") and argv[0] not in KNOWN_COMMANDS:
-        return build_default_write_parser().parse_args(argv)
-
-    return build_parser().parse_args(argv)
-
-
-def main(argv=None):
-    args = parse_args(argv)
+def _run(parser, argv=None):
+    args = parser.parse_args(argv)
     try:
         return args.func(args)
     except (RbcpError, ValueError) as exc:
@@ -302,5 +288,21 @@ def main(argv=None):
         return 2
 
 
+def main_writer(argv=None):
+    return _run(build_writer_parser(), argv)
+
+
+def main_reader(argv=None):
+    return _run(build_reader_parser(), argv)
+
+
+def main_command(argv=None):
+    return _run(build_command_parser(), argv)
+
+
+def main(argv=None):
+    return main_command(argv)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_command())
