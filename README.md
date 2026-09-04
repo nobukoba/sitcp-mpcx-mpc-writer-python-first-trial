@@ -105,7 +105,7 @@ Public references include:
 
 The project contains no official executable, proprietary library, or user-specific MPC/MPCX file. Users must obtain any required SiTCP license data through the legitimate Bee Beans Technologies process. This project only transfers already-authorized data to compatible hardware; it does not create license data or circumvent licensing checks.
 
-For technical provenance and interoperability notes, see `REVERSE_ENGINEERING.md`.
+For byte-level format, EEPROM mapping, RBCP behavior, and information sufficient for an independent compatible implementation, see `IMPLEMENTATION_NOTES.md`.
 
 ## Command summary
 
@@ -149,7 +149,7 @@ Docker Desktop networking on macOS differs from native Linux host networking. Fo
 ├── mpc-mpcx-command
 ├── Dockerfile
 ├── README.md
-├── REVERSE_ENGINEERING.md
+├── IMPLEMENTATION_NOTES.md
 ├── pyproject.toml
 ├── src/
 │   └── sitcp_mpc_writer/
