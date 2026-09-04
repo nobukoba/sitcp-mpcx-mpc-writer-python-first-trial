@@ -2,6 +2,8 @@
 
 Experimental cross-platform Python CLI for inspecting, reading, verifying, and writing SiTCP / SiTCP-XG MPC data from macOS, Linux, WSL, and Docker without using the official Windows GUI.
 
+This project is intended only for interoperability with legitimately obtained SiTCP / SiTCP-XG hardware and MPC/MPCX files. It does **not** generate, modify, or bypass SiTCP licenses.
+
 The user-facing commands are split by purpose:
 
 ```text
@@ -40,38 +42,7 @@ or, for a normal SiTCP device:
 
 The first argument is the target IP address and the second is the MPC/MPCX file. The file extension is not used to decide whether the payload is SiTCP or SiTCP-XG.
 
-`mpc-mpcx-writer` now performs actual EEPROM programming. The sequence is:
-
-```text
-classify 22-byte MPC/MPCX payload
-    ↓
-read current EEPROM bytes that must be preserved
-    ↓
-enable EEPROM writes (0xFFFFFCFF <- 0x00)
-    ↓
-write EEPROM in 16-byte RBCP transactions
-    ↓
-disable EEPROM writes (0xFFFFFCFF <- 0xFF)
-    ↓
-read back EEPROM and verify byte-for-byte
-```
-
-Write transactions are deliberately **not automatically retried**. A lost UDP ACK does not prove that an EEPROM write failed, so blindly repeating a write is avoided.
-
-For SiTCP-XG, the 24-byte EEPROM record is constructed as:
-
-```text
-file[0:16]   -> EEPROM 0xFFFFFC00..0xFFFFFC0F
-FC10..FC11   -> preserve current EEPROM values
-file[16:22]  -> EEPROM 0xFFFFFC12..0xFFFFFC17
-```
-
-For normal SiTCP, the current `0xFFFFFC00..0xFFFFFC4F` image is read first and preserved except for:
-
-```text
-file[0:6]   -> EEPROM 0xFFFFFC12..0xFFFFFC17
-file[6:22]  -> EEPROM 0xFFFFFC40..0xFFFFFC4F
-```
+`mpc-mpcx-writer` performs EEPROM programming and read-back verification. Write transactions are deliberately **not automatically retried**: a lost UDP ACK does not prove that an EEPROM write failed, so blindly repeating a write is avoided.
 
 A successful write ends with:
 
@@ -93,39 +64,12 @@ This is the normal read-only command. No MPC/MPCX file is required.
 
 Detailed inspection, verification, and RBCP operations are collected under `mpc-mpcx-command`.
 
-Verify a file against a device without writing:
-
 ```bash
 ./mpc-mpcx-command verify 192.168.2.169 2F20880E82.mpcx
-```
-
-Inspect a file without hardware:
-
-```bash
 ./mpc-mpcx-command inspect 2F20880E82.mpcx
-```
-
-Check RBCP connectivity:
-
-```bash
-./mpc-mpcx-command probe 192.168.10.10 \
-  --address 0x00000000
-```
-
-Expert raw RBCP read:
-
-```bash
-./mpc-mpcx-command rbcp-read 192.168.10.10 \
-  --address 0x00000000 \
-  --length 16
-```
-
-Expert raw RBCP write:
-
-```bash
-./mpc-mpcx-command rbcp-write 192.168.10.10 \
-  --address 0x12345678 \
-  --hex-data "01 02 03 04"
+./mpc-mpcx-command probe 192.168.10.10 --address 0x00000000
+./mpc-mpcx-command rbcp-read 192.168.10.10 --address 0x00000000 --length 16
+./mpc-mpcx-command rbcp-write 192.168.10.10 --address 0x12345678 --hex-data "01 02 03 04"
 ```
 
 Clear the MPC EEPROM area:
@@ -144,13 +88,13 @@ Port `4660` is used automatically. Specify `--port` only when the target uses an
 ./mpc-mpcx-writer 192.168.2.169 2F20880E82.mpcx --timeout 3
 ```
 
-## Where the format information comes from
+## Basis of the implementation
 
-This project uses three evidence sources and keeps them separate:
+The implementation was developed for cross-platform interoperability using:
 
-1. **Public Bee Beans Technologies documentation** — documents SiTCP/SiTCP-XG, RBCP-accessible internal/EEPROM areas, EEPROM write protection, and operation of the official MPC Writer.
-2. **Static analysis of the official `SiTcpMpcWriteXG.exe`** — recovered details not found in the reviewed public manuals, including the exact 22-byte length check, content classifier, RBCP packet handling, and XG record construction.
-3. **Tests with matching real MPC files and hardware** — confirmed the normal-SiTCP and SiTCP-XG file-to-EEPROM mappings used here.
+- publicly available Bee Beans Technologies SiTCP / SiTCP-XG documentation and software;
+- behavior and compatibility analysis of the official Windows MPC Writer;
+- verification with legitimately obtained MPC/MPCX files and corresponding hardware.
 
 Public references include:
 
@@ -159,9 +103,9 @@ Public references include:
 - Bee Beans Technologies `sitcpy`: https://github.com/BeeBeansTechnologies/sitcpy
 - SiTCP Forum: https://sitcp.bbtech.co.jp/
 
-The public MPC Writer guide states that an MPCX file contains the SiTCP-XG global MAC address and license information and is written to EEPROM. The reviewed public documentation does not describe the complete byte-level 22-byte MPC payload format or the Writer's two-path content classifier; those details were reconstructed from the Writer and checked against real hardware.
+The project contains no official executable, proprietary library, or user-specific MPC/MPCX file. Users must obtain any required SiTCP license data through the legitimate Bee Beans Technologies process. This project only transfers already-authorized data to compatible hardware; it does not create license data or circumvent licensing checks.
 
-See `REVERSE_ENGINEERING.md` for details.
+For technical provenance and interoperability notes, see `REVERSE_ENGINEERING.md`.
 
 ## Command summary
 
